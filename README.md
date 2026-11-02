@@ -6,3 +6,4 @@ Team 3: The HALK
 - Leo Mazur (lgm59)
 - Amanda Zhu (az565)
 - Helena Zhang (hxz3)
+- Kyle Fan (kf446)
