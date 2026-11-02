@@ -1,6 +1,6 @@
 # 3110
 
-Team 3: The Halk
+Team 3: The HALK
 
 - Alvin Lyuh (akl93)
 - Leo Mazur (lgm59)
