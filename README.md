@@ -1,2 +1,5 @@
 # 3110
-Our 3110 project
+
+Team 3: The Halk
+
+- Alvin Lyuh (akl93)
