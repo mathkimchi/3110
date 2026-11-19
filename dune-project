@@ -1,4 +1,4 @@
-(lang dune 3.25)
+(lang dune 3.0)
 
 (name game)
 
