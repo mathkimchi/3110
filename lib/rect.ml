@@ -1,3 +1,4 @@
-type t = { x : float; y : float; w : float; h : float }
+(** [pos] is the 2d coordinate of the bottom left corner *)
+type t = { pos: Vec2d.t; w : float; h : float }
 let overlaps a b =
-  a.x < b.x +. b.w && b.x < a.x +. a.w && a.y < b.y +. b.h && b.y < a.y +. a.h
+  a.pos.x < b.pos.x +. b.w && b.pos.x < a.pos.x +. a.w && a.pos.y < b.pos.y +. b.h && b.pos.y < a.pos.y +. a.h

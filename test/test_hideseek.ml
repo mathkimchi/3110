@@ -25,11 +25,11 @@ let assert_pos ~x ~y (e : Entity.t) =
 
 (* ---------- Physics.move ---------- *)
 
-let wall = Rect.{ x = 100.; y = 0.; w = 20.; h = 200. } (* vertical, x 100..120 *)
-let floor = Rect.{ x = 0.; y = 100.; w = 200.; h = 20. } (* horizontal, y 100..120 *)
+let wall = Rect.{ pos= { x = 100.; y = 0.;}; w = 20.; h = 200. } (* vertical, x 100..120 *)
+let floor = Rect.{ pos= { x = 0.; y = 100.;}; w = 200.; h = 20. } (* horizontal, y 100..120 *)
 
 (* same x range as [wall] but far below the entity *)
-let far_wall = Rect.{ x = 100.; y = 300.; w = 20.; h = 100. }
+let far_wall = Rect.{ pos = {x = 100.; y = 300.;}; w = 20.; h = 100. }
 
 let move_test name walls e dir ~x ~y =
   name >:: fun _ -> assert_pos ~x ~y (Physics.move walls e dir dt)
