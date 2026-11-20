@@ -9,9 +9,9 @@ let step_len = 10.
 let diag = step_len /. sqrt 2.
 
 let mk ?(id = 0) ?(role = Entity.Hider) ?(size = 10.) ?(speed = 600.) x y =
-  Entity.{ id; role; pos = Vec.{ x; y }; size; speed; alive = true }
+  Entity.{ id; role; pos = Vec2d.{ x; y }; size; speed; alive = true }
 
-let v x y = Vec.{ x; y }
+let v x y = Vec2d.{ x; y }
 let right = v 1. 0.
 let left = v (-1.) 0.
 let up = v 0. (-1.)
@@ -41,7 +41,7 @@ let physics_tests =
     move_test "left, no walls" [] (mk 0. 0.) left ~x:(-10.) ~y:0.;
     move_test "up, no walls" [] (mk 0. 0.) up ~x:0. ~y:(-10.);
     move_test "down, no walls" [] (mk 0. 0.) down ~x:0. ~y:10.;
-    move_test "zero dir stays put" [] (mk 5. 5.) Vec.zero ~x:5. ~y:5.;
+    move_test "zero dir stays put" [] (mk 5. 5.) Vec2d.zero ~x:5. ~y:5.;
     move_test "diagonal is not faster" [] (mk 0. 0.) (v 1. 1.) ~x:diag ~y:diag;
     move_test "long dir is normalized" [] (mk 0. 0.) (v 5. 0.) ~x:10. ~y:0.;
     (* partition: which side of the wall you hit; should end flush *)

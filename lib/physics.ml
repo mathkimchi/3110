@@ -23,6 +23,6 @@ let resolve_y walls (e : Entity.t) dy : Entity.t =
       { new_e with pos = {e.pos with y = snapped_y }}
 
 let move walls (e : Entity.t) dir dt = 
-  let d = Vec.scale (e.speed *. dt) (Vec.normalize dir) in
+  let d = Vec2d.scale (e.speed *. dt) (Vec2d.normalize dir) in
   let e_resolvedx = resolve_x walls e d.x in
   resolve_y walls e_resolvedx d.y

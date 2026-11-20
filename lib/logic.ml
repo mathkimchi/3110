@@ -1,1 +1,1 @@
-let decide _world _entities _e = Vec.zero
+let decide _world _entities _e = Vec2d.zero
