@@ -6,8 +6,8 @@ let resolve_x walls (e : Entity.t) dx : Entity.t =
   | None -> new_e
   | Some wall ->
       let snapped_x =
-        if dx > 0. then wall.x -. e.size
-        else wall.x +. wall.w in
+        if dx > 0. then wall.pos.x -. e.size
+        else wall.pos.x +. wall.w in
       { new_e with pos = {e.pos with x = snapped_x }}
 
  
@@ -18,11 +18,11 @@ let resolve_y walls (e : Entity.t) dy : Entity.t =
   | None -> new_e
   | Some wall ->
       let snapped_y =
-        if dy > 0. then wall.y -. e.size
-        else wall.y +. wall.h in
+        if dy > 0. then wall.pos.y -. e.size
+        else wall.pos.y +. wall.h in
       { new_e with pos = {e.pos with y = snapped_y }}
 
 let move walls (e : Entity.t) dir dt = 
-  let d = Vec.scale (e.speed *. dt) (Vec.normalize dir) in
+  let d = Vec2d.scale (e.speed *. dt) (Vec2d.normalize dir) in
   let e_resolvedx = resolve_x walls e d.x in
   resolve_y walls e_resolvedx d.y

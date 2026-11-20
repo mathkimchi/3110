@@ -5,9 +5,9 @@ let init walls entities = { walls; entities }
 let entities st = st.entities
 let walls st = st.walls
 
-(* direction for entity [id], or Vec.zero if it got no input *)
+(* direction for entity [id], or Vec2d.zero if it got no input *)
 let input_for inputs id = match List.assoc_opt id inputs with
-| None -> Vec.zero
+| None -> Vec2d.zero
 | Some direction -> direction
 
 (* move one entity; dead entities stay put *)
