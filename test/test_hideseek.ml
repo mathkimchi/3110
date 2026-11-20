@@ -106,9 +106,8 @@ let game_tests =
 let strategy_tests =
   [
     ( "Stay never moves" >:: fun _ ->
-      let open Strategy.Stay in
       let w = World.default in
-      let _, dir = decide (init w) w (List.hd (World.hunters w)) in
+      let dir = Strategy.Stay.decide w (List.hd (World.hunters w)) in
       assert_equal ~cmp:feq ~printer:string_of_float ~msg:"x" 0. dir.x;
       assert_equal ~cmp:feq ~printer:string_of_float ~msg:"y" 0. dir.y );
   ]
