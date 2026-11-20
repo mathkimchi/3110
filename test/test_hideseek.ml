@@ -101,7 +101,20 @@ let game_tests =
       assert_bool "not over" (not (Game.is_over World.default)) );
   ]
 
+(* ---------- Strategy ---------- *)
+
+let strategy_tests =
+  [
+    ( "Stay never moves" >:: fun _ ->
+      let open Strategy.Stay in
+      let w = World.default in
+      let _, dir = decide (init w) w (List.hd (World.hunters w)) in
+      assert_equal ~cmp:feq ~printer:string_of_float ~msg:"x" 0. dir.x;
+      assert_equal ~cmp:feq ~printer:string_of_float ~msg:"y" 0. dir.y );
+  ]
+
 let suite =
-  "hideseek" >::: [ "physics" >::: physics_tests; "game" >::: game_tests ]
+  "hideseek" >::: [ "physics" >::: physics_tests; "game" >::: game_tests;
+    "strategy" >::: strategy_tests ]
 
 let () = run_test_tt_main suite
