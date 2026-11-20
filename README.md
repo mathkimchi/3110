@@ -15,3 +15,9 @@ Currently, just run:
 ```sh
 dune exec bin/main.exe
 ```
+
+## Coding Practices
+
+Work on a new branch for each feature, named `date-feature` (ex: 2026-11-20-update-coding-practices).
+
+For changes made with AI, start commit message with `[AI]`.
