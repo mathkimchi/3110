@@ -1,6 +1,11 @@
-type t
-val init : Rect.t list -> Entity.t list -> t
-val step : t -> (int * Vec2d.t) list -> float -> t
-val entities : t -> Entity.t list
-val walls : t -> Rect.t list
-val is_over : t -> bool
+(** Game rules: moving everyone and deciding who gets caught. *)
+
+type outcome = Victory | Defeat | Mid_game
+(** [Victory] is not produced yet: the win condition is undecided. *)
+
+val step :
+  (module Strategy.S) -> World.t -> Vec2d.t -> float -> World.t * outcome
+(** [step strat w dir dt] moves the player in direction [dir] for [dt]
+    seconds, then moves each hunter in the direction [strat] chooses, then
+    kills the player if they overlap any living hunter. A dead player does not
+    move and the outcome stays [Defeat]. *)
