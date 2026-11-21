@@ -64,7 +64,10 @@ let physics_tests =
 
 let hunter = mk ~id:1 ~role:Entity.Hunter 50. 50.
 let world ?(walls = []) ?(hunters = [ hunter ]) hider =
-  World.init ~walls ~hider ~hunters
+  World.init ~walls ~entities:(hider :: hunters)
+
+(* the first hider; most tests have exactly one *)
+let first_hider w = List.hd (World.hiders w)
 
 (* a test-only strategy: every hunter always walks left *)
 module Left : Strategy.S = struct
@@ -86,25 +89,25 @@ let game_tests =
   [
     ( "no input means no movement" >:: fun _ ->
       let w, o = step (world (mk 0. 0.)) Vec2d.zero in
-      assert_pos ~x:0. ~y:0. (World.hider w);
+      assert_pos ~x:0. ~y:0. (first_hider w);
       assert_outcome Game.Mid_game o );
     ( "input moves the hider, Stay hunter stays" >:: fun _ ->
       let w, _ = step (world (mk 0. 0.)) right in
-      assert_pos ~x:10. ~y:0. (World.hider w);
+      assert_pos ~x:10. ~y:0. (first_hider w);
       assert_pos ~x:50. ~y:50. (List.hd (World.hunters w)) );
     ( "step uses the world's walls" >:: fun _ ->
       let w, _ = step (world ~walls:[ wall ] ~hunters:[] (mk 85. 50.)) right in
-      assert_pos ~x:90. ~y:50. (World.hider w) );
+      assert_pos ~x:90. ~y:50. (first_hider w) );
     ( "hider overlapping hunter dies" >:: fun _ ->
       let w, o = step (world (mk 55. 55.)) Vec2d.zero in
-      assert_bool "hider should be dead" (not (World.hider w).alive);
+      assert_bool "hider should be dead" (not (first_hider w).alive);
       assert_outcome Game.Defeat o );
     ( "hider moving into hunter dies" >:: fun _ ->
       let _, o = step (world (mk 35. 50.)) right in
       assert_outcome Game.Defeat o );
     ( "flush against hunter is not a touch" >:: fun _ ->
       let w, o = step (world (mk 40. 50.)) Vec2d.zero in
-      assert_bool "hider should be alive" (World.hider w).alive;
+      assert_bool "hider should be alive" (first_hider w).alive;
       assert_outcome Game.Mid_game o );
     ( "touching any one of several hunters kills" >:: fun _ ->
       let far = mk ~id:2 ~role:Entity.Hunter 300. 300. in
@@ -113,7 +116,7 @@ let game_tests =
     ( "dead hider does not move and stays defeated" >:: fun _ ->
       let dead = { (mk 0. 0.) with alive = false } in
       let w, o = step (world ~hunters:[] dead) right in
-      assert_pos ~x:0. ~y:0. (World.hider w);
+      assert_pos ~x:0. ~y:0. (first_hider w);
       assert_outcome Game.Defeat o );
     ( "hunters move using the strategy" >:: fun _ ->
       let w, _ = step ~strat:(module Left) (world (mk 0. 200.)) Vec2d.zero in
@@ -121,9 +124,48 @@ let game_tests =
     ( "hunter walking into a standing hider kills" >:: fun _ ->
       let _, o = step ~strat:(module Left) (world (mk 35. 50.)) Vec2d.zero in
       assert_outcome Game.Defeat o );
+    ( "input moves every hider" >:: fun _ ->
+      let h2 = mk ~id:2 0. 100. in
+      let w = World.init ~walls:[] ~entities:[ mk 0. 0.; h2 ] in
+      let w, _ = step w right in
+      match World.hiders w with
+      | [ a; b ] -> assert_pos ~x:10. ~y:0. a; assert_pos ~x:10. ~y:100. b
+      | _ -> assert_failure "expected two hiders" );
+    ( "one of two hiders caught: game goes on" >:: fun _ ->
+      let safe = mk ~id:2 300. 300. in
+      let w = World.init ~walls:[] ~entities:[ mk 55. 55.; safe; hunter ] in
+      let w, o = step w Vec2d.zero in
+      let alive = List.map (fun (e : Entity.t) -> e.alive) (World.hiders w) in
+      assert_equal ~printer:(fun l -> String.concat "," (List.map string_of_bool l)) [ false; true ] alive;
+      assert_outcome Game.Mid_game o );
+    ( "all hiders caught is defeat" >:: fun _ ->
+      let h2 = mk ~id:2 45. 45. in
+      let w = World.init ~walls:[] ~entities:[ mk 55. 55.; h2; hunter ] in
+      let _, o = step w Vec2d.zero in
+      assert_outcome Game.Defeat o );
     ( "default world starts in play" >:: fun _ ->
       let _, o = step World.default Vec2d.zero in
       assert_outcome Game.Mid_game o );
+  ]
+
+(* ---------- World ---------- *)
+
+let world_tests =
+  let h0 = mk ~id:0 0. 0. and u1 = mk ~id:1 ~role:Entity.Hunter 0. 0. in
+  let h2 = mk ~id:2 0. 0. in
+  let w = World.init ~walls:[] ~entities:[ h0; u1; h2 ] in
+  let ids es = List.map (fun (e : Entity.t) -> e.id) es in
+  let ids_test name expected es =
+    name >:: fun _ ->
+    assert_equal ~printer:(fun l -> String.concat "," (List.map string_of_int l))
+      expected (ids es)
+  in
+  [
+    ids_test "entities keeps order" [ 0; 1; 2 ] (World.entities w);
+    ids_test "hiders" [ 0; 2 ] (World.hiders w);
+    ids_test "hunters" [ 1 ] (World.hunters w);
+    ids_test "entities_by_role Hider" [ 0; 2 ] (World.entities_by_role w Entity.Hider);
+    ids_test "no hunters" [] (World.hunters (World.init ~walls:[] ~entities:[ h0 ]));
   ]
 
 (* ---------- Strategy ---------- *)
@@ -139,6 +181,6 @@ let strategy_tests =
 
 let suite =
   "hideseek" >::: [ "physics" >::: physics_tests; "game" >::: game_tests;
-    "strategy" >::: strategy_tests ]
+    "world" >::: world_tests; "strategy" >::: strategy_tests ]
 
 let () = run_test_tt_main suite

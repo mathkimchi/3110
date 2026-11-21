@@ -2,25 +2,42 @@
 
 type outcome = Victory | Defeat | Mid_game
 
-(* true if [p] overlaps any living hunter *)
-let caught hunters (p : Entity.t) =
+(* true if [e] overlaps any living hunter *)
+let caught hunters (e : Entity.t) =
   List.exists
     (fun (h : Entity.t) ->
-      h.alive && Rect.overlaps (Entity.hitbox h) (Entity.hitbox p))
+      h.alive && Rect.overlaps (Entity.hitbox h) (Entity.hitbox e))
     hunters
+
+let any_alive es = List.exists (fun (e : Entity.t) -> e.alive) es
 
 let step strat w dir dt =
   let module S = (val strat : Strategy.S) in
-  let p = World.hider w in
-  if not p.alive then (w, Defeat)
+  if not (any_alive (World.hiders w)) then (w, Defeat)
   else
     let walls = World.walls w in
-    (* hider moves first, so hunters decide based on where the hider is now *)
-    let w = World.with_hider w (Physics.move walls p dir dt) in
-    let move_hunter h = Physics.move walls h (S.decide w h) dt in
-    let w = World.with_hunters w (List.map move_hunter (World.hunters w)) in
-    (* check after everyone has moved, so a hunter walking into the hider counts *)
-    let p = World.hider w in
-    if caught (World.hunters w) p then
-      (World.with_hider w { p with alive = false }, Defeat)
-    else (w, Mid_game)
+    let update f w = World.with_entities w (List.map f (World.entities w)) in
+    (* hiders move first, so hunters decide based on where the hiders are now *)
+    let w =
+      update
+        (fun (e : Entity.t) ->
+          if e.role = Hider && e.alive then Physics.move walls e dir dt else e)
+        w
+    in
+    let w =
+      update
+        (fun (e : Entity.t) ->
+          if e.role = Hunter then Physics.move walls e (S.decide w e) dt else e)
+        w
+    in
+    (* check after everyone has moved, so a hunter walking into a hider counts *)
+    let hunters = World.hunters w in
+    let w =
+      update
+        (fun (e : Entity.t) ->
+          if e.role = Hider && e.alive && caught hunters e then
+            { e with alive = false }
+          else e)
+        w
+    in
+    if any_alive (World.hiders w) then (w, Mid_game) else (w, Defeat)

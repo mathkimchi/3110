@@ -3,18 +3,26 @@
 
 type t
 
-val init : walls:Rect.t list -> hider:Entity.t -> hunters:Entity.t list -> t
-(** [init ~walls ~hider ~hunters] is the world containing exactly these. *)
+val init : walls:Rect.t list -> entities:Entity.t list -> t
+(** [init ~walls ~entities] is the world containing exactly these, keeping the
+    order of [entities]. *)
 
 val walls : t -> Rect.t list
-val hider : t -> Entity.t
+
+val entities : t -> Entity.t list
+(** [entities w] is every entity in [w], hiders and hunters alike, in order. *)
+
+val entities_by_role : t -> Entity.role -> Entity.t list
+(** [entities_by_role w r] is the entities in [w] whose role is [r], in order. *)
+
+val hiders : t -> Entity.t list
+(** [hiders w] is [entities_by_role w Hider]. *)
+
 val hunters : t -> Entity.t list
+(** [hunters w] is [entities_by_role w Hunter]. *)
 
-val with_hider : t -> Entity.t -> t
-(** [with_hider w p] is [w] with its hider replaced by [p]. *)
-
-val with_hunters : t -> Entity.t list -> t
-(** [with_hunters w hs] is [w] with its hunters replaced by [hs]. *)
+val with_entities : t -> Entity.t list -> t
+(** [with_entities w es] is [w] with its entities replaced by [es]. *)
 
 val default : t
 (** A small hard-coded map for the prototype: a walled 400x400 arena with one

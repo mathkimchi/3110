@@ -1,11 +1,15 @@
-type t = { walls : Rect.t list; hider : Entity.t; hunters : Entity.t list }
+type t = { walls : Rect.t list; entities : Entity.t list }
 
-let init ~walls ~hider ~hunters = { walls; hider; hunters }
+let init ~walls ~entities = { walls; entities }
 let walls w = w.walls
-let hider w = w.hider
-let hunters w = w.hunters
-let with_hider w hider = { w with hider }
-let with_hunters w hunters = { w with hunters }
+let entities w = w.entities
+
+let entities_by_role w role =
+  List.filter (fun (e : Entity.t) -> e.role = role) w.entities
+
+let hiders w = entities_by_role w Entity.Hider
+let hunters w = entities_by_role w Entity.Hunter
+let with_entities w entities = { w with entities }
 
 let rect x y w h = Rect.{ pos = Vec2d.{ x; y }; w; h }
 
@@ -25,6 +29,6 @@ let default =
   in
   {
     walls;
-    hider = entity 0 Entity.Hider 50. 50.;
-    hunters = [ entity 1 Entity.Hunter 330. 330. ];
+    entities =
+      [ entity 0 Entity.Hider 50. 50.; entity 1 Entity.Hunter 330. 330. ];
   }
