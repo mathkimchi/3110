@@ -199,7 +199,12 @@ let user_input_strategy_tests =
       keys_test "W+D is up-right" [ W; D ] ~x:1. ~y:(-1.);
       keys_test "A+D cancel" [ A; D ] ~x:0. ~y:0.;
       keys_test "all four cancel" [ W; A; S; D ] ~x:0. ~y:0.;
-      keys_test "other keys ignored" [ Up; Left ] ~x:0. ~y:0.;
+      keys_test "Up is up" [ Up ] ~x:0. ~y:(-1.);
+      keys_test "Left is left" [ Left ] ~x:(-1.) ~y:0.;
+      keys_test "Down is down" [ Down ] ~x:0. ~y:1.;
+      keys_test "Right is right" [ Right ] ~x:1. ~y:0.;
+      keys_test "arrow and letter mix" [ W; Right ] ~x:1. ~y:(-1.);
+      keys_test "other keys ignored" [ Q; Space ] ~x:0. ~y:0.;
     ]
 
 let suite =

@@ -1,10 +1,13 @@
+let up = Vec2d.{ x = 0.; y = -1. }
+let left = Vec2d.{ x = -1.; y = 0. }
+let down = Vec2d.{ x = 0.; y = 1. }
+let right = Vec2d.{ x = 1.; y = 0. }
+
 let key_directions =
   Raylib.Key.
     [
-      (W, Vec2d.{ x = 0.; y = -1. });
-      (A, Vec2d.{ x = -1.; y = 0. });
-      (S, Vec2d.{ x = 0.; y = 1. });
-      (D, Vec2d.{ x = 1.; y = 0. });
+      (W, up); (A, left); (S, down); (D, right);
+      (Up, up); (Left, left); (Down, down); (Right, right);
     ]
 
 (* summing lets diagonals combine; Physics.move normalizes, so they aren't faster *)
