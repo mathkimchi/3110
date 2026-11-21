@@ -3,9 +3,21 @@
 type outcome = Victory | Defeat | Mid_game
 (** [Victory] is not produced yet: the win condition is undecided. *)
 
-val step :
-  (module Strategy.S) -> World.t -> Vec2d.t -> float -> World.t * outcome
-(** [step strat w dir dt] moves every living hider in direction [dir] for
-    [dt] seconds, then moves each hunter in the direction [strat] chooses, then
-    kills each hider that overlaps any living hunter. Dead hiders do not move.
-    The outcome is [Defeat] once no hider is alive. *)
+type t
+(** A game in progress: the world plus the strategy controlling each entity. *)
+
+val init : World.t -> (module Strategy.S) list -> t
+(** [init w strats] is a game on [w] where the [i]th strategy in [strats]
+    controls the [i]th entity of [World.entities w]. The game never reorders
+    or removes entities, so this pairing holds for the whole game.
+    Raises [Invalid_argument] if [strats] and the entities differ in length. *)
+
+val world : t -> World.t
+(** [world g] is the current world of [g]. *)
+
+val step : t -> float -> t * outcome
+(** [step g dt] advances [g] by [dt] seconds: every living hider moves in the
+    direction its strategy chooses, then every living hunter does (seeing
+    where the hiders now are), then each hider that overlaps any living hunter
+    dies. Dead entities do not move. The outcome is [Defeat] once no hider is
+    alive. *)

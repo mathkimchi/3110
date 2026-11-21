@@ -74,8 +74,20 @@ module Left : Strategy.S = struct
   let decide _ _ = left
 end
 
+(* a test-only strategy that always heads in [dir] *)
+let toward dir : (module Strategy.S) =
+  (module struct
+    let decide _ _ = dir
+  end)
+
+(* one step where every hider heads in [dir] and every hunter uses [strat] *)
 let step ?(strat = (module Strategy.Stay : Strategy.S)) w dir =
-  Game.step strat w dir dt
+  let strat_of (e : Entity.t) =
+    match e.role with Entity.Hider -> toward dir | Entity.Hunter -> strat
+  in
+  let g = Game.init w (List.map strat_of (World.entities w)) in
+  let g, o = Game.step g dt in
+  (Game.world g, o)
 
 let string_of_outcome = function
   | Game.Victory -> "Victory"
@@ -143,6 +155,28 @@ let game_tests =
       let w = World.init ~walls:[] ~entities:[ mk 55. 55.; h2; hunter ] in
       let _, o = step w Vec2d.zero in
       assert_outcome Game.Defeat o );
+    ( "each entity uses its own strategy" >:: fun _ ->
+      let h2 = mk ~id:2 ~role:Entity.Hunter 200. 200. in
+      let w = World.init ~walls:[] ~entities:[ mk 0. 0.; hunter; h2 ] in
+      let g =
+        Game.init w [ toward down; (module Left); (module Strategy.Stay) ]
+      in
+      let g, _ = Game.step g dt in
+      match World.entities (Game.world g) with
+      | [ a; b; c ] ->
+          assert_pos ~x:0. ~y:10. a;
+          assert_pos ~x:40. ~y:50. b;
+          assert_pos ~x:200. ~y:200. c
+      | _ -> assert_failure "expected three entities" );
+    ( "init rejects too few strategies" >:: fun _ ->
+      assert_raises
+        (Invalid_argument "Game.init: need exactly one strategy per entity")
+        (fun () -> Game.init (world (mk 0. 0.)) [ toward right ]) );
+    ( "init rejects too many strategies" >:: fun _ ->
+      let s = (module Strategy.Stay : Strategy.S) in
+      assert_raises
+        (Invalid_argument "Game.init: need exactly one strategy per entity")
+        (fun () -> Game.init (world ~hunters:[] (mk 0. 0.)) [ s; s ]) );
     ( "default world starts in play" >:: fun _ ->
       let _, o = step World.default Vec2d.zero in
       assert_outcome Game.Mid_game o );

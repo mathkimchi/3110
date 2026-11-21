@@ -7,19 +7,14 @@ let draw w outcome =
   Raylib.end_drawing ()
 
 (* one iteration per frame; once the game is over the world stops changing *)
-let rec loop w outcome =
+let rec loop g outcome =
   if not (Raylib.window_should_close ()) then begin
-    let w, outcome =
-      if outcome = Game.Mid_game then
-        Game.step
-          (module Strategy.Stay)
-          w
-          (User_input_strategy.direction_of_keys Raylib.is_key_down)
-          (Raylib.get_frame_time ())
-      else (w, outcome)
+    let g, outcome =
+      if outcome = Game.Mid_game then Game.step g (Raylib.get_frame_time ())
+      else (g, outcome)
     in
-    draw w outcome;
-    loop w outcome
+    draw (Game.world g) outcome;
+    loop g outcome
   end
 
 let () =
@@ -30,5 +25,10 @@ let () =
   Raylib.set_target_fps 60;
   (* Raylib quits on Esc by default; Q matches the old terminal prototype *)
   Raylib.set_exit_key Raylib.Key.Q;
-  loop World.default Game.Mid_game;
+  (* World.default is [ hider 0; hunter 1 ]: the keyboard drives the hider *)
+  let g =
+    Game.init World.default
+      [ (module User_input_strategy); (module Strategy.Stay) ]
+  in
+  loop g Game.Mid_game;
   Raylib.close_window ()
