@@ -16,6 +16,13 @@ Currently, just run:
 dune exec bin/main.exe
 ```
 
+On wayland, you can run:
+
+```sh
+xwayland-satellite :1
+DISPLAY=:1 dune exec bin/main.exe
+```
+
 ## Coding Practices
 
 Work on a new branch for each feature, named `date-feature` (ex: 2026-11-20-update-coding-practices).
