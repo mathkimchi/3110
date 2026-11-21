@@ -1,2 +1,3 @@
 (library
- (name hideseek))
+ (name hideseek)
+ (libraries raylib))

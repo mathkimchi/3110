@@ -179,8 +179,32 @@ let strategy_tests =
       assert_equal ~cmp:feq ~printer:string_of_float ~msg:"y" 0. dir.y );
   ]
 
+(* ---------- User_input_strategy ---------- *)
+
+(* [keys_test name held ~x ~y]: holding exactly the keys [held] gives (x, y) *)
+let keys_test name held ~x ~y =
+  name >:: fun _ ->
+  let dir = User_input_strategy.direction_of_keys (fun k -> List.mem k held) in
+  assert_equal ~cmp:feq ~printer:string_of_float ~msg:"x" x dir.x;
+  assert_equal ~cmp:feq ~printer:string_of_float ~msg:"y" y dir.y
+
+let user_input_strategy_tests =
+  Raylib.Key.
+    [
+      keys_test "no keys" [] ~x:0. ~y:0.;
+      keys_test "W is up" [ W ] ~x:0. ~y:(-1.);
+      keys_test "A is left" [ A ] ~x:(-1.) ~y:0.;
+      keys_test "S is down" [ S ] ~x:0. ~y:1.;
+      keys_test "D is right" [ D ] ~x:1. ~y:0.;
+      keys_test "W+D is up-right" [ W; D ] ~x:1. ~y:(-1.);
+      keys_test "A+D cancel" [ A; D ] ~x:0. ~y:0.;
+      keys_test "all four cancel" [ W; A; S; D ] ~x:0. ~y:0.;
+      keys_test "other keys ignored" [ Up; Left ] ~x:0. ~y:0.;
+    ]
+
 let suite =
   "hideseek" >::: [ "physics" >::: physics_tests; "game" >::: game_tests;
-    "world" >::: world_tests; "strategy" >::: strategy_tests ]
+    "world" >::: world_tests; "strategy" >::: strategy_tests;
+    "user_input_strategy" >::: user_input_strategy_tests ]
 
 let () = run_test_tt_main suite
