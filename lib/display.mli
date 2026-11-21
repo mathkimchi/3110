@@ -1,4 +1,4 @@
-(** Text output for the terminal prototype. *)
+(** Text output for the prototype: the lines main draws in the window. *)
 
 val render : World.t -> Game.outcome -> string
 (** [render w o] lists each entity's role, id and coordinates, then the
