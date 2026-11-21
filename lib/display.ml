@@ -6,11 +6,11 @@ let string_of_outcome = function
 let coords (e : Entity.t) = Printf.sprintf "(%.1f, %.1f)" e.pos.x e.pos.y
 
 let render w o =
-  let player = "Player: " ^ coords (World.player w) in
+  let hider = "Hider: " ^ coords (World.hider w) in
   let hunters =
     List.map
       (fun (h : Entity.t) -> Printf.sprintf "Hunter %d: %s" h.id (coords h))
       (World.hunters w)
   in
   let status = "Status: " ^ string_of_outcome o in
-  String.concat "\n" ((player :: hunters) @ [ status ])
+  String.concat "\n" ((hider :: hunters) @ [ status ])

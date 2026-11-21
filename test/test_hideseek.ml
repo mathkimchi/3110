@@ -63,8 +63,8 @@ let physics_tests =
 (* ---------- Game.step ---------- *)
 
 let hunter = mk ~id:1 ~role:Entity.Hunter 50. 50.
-let world ?(walls = []) ?(hunters = [ hunter ]) player =
-  World.init ~walls ~player ~hunters
+let world ?(walls = []) ?(hunters = [ hunter ]) hider =
+  World.init ~walls ~hider ~hunters
 
 (* a test-only strategy: every hunter always walks left *)
 module Left : Strategy.S = struct
@@ -86,39 +86,39 @@ let game_tests =
   [
     ( "no input means no movement" >:: fun _ ->
       let w, o = step (world (mk 0. 0.)) Vec2d.zero in
-      assert_pos ~x:0. ~y:0. (World.player w);
+      assert_pos ~x:0. ~y:0. (World.hider w);
       assert_outcome Game.Mid_game o );
-    ( "input moves the player, Stay hunter stays" >:: fun _ ->
+    ( "input moves the hider, Stay hunter stays" >:: fun _ ->
       let w, _ = step (world (mk 0. 0.)) right in
-      assert_pos ~x:10. ~y:0. (World.player w);
+      assert_pos ~x:10. ~y:0. (World.hider w);
       assert_pos ~x:50. ~y:50. (List.hd (World.hunters w)) );
     ( "step uses the world's walls" >:: fun _ ->
       let w, _ = step (world ~walls:[ wall ] ~hunters:[] (mk 85. 50.)) right in
-      assert_pos ~x:90. ~y:50. (World.player w) );
-    ( "player overlapping hunter dies" >:: fun _ ->
+      assert_pos ~x:90. ~y:50. (World.hider w) );
+    ( "hider overlapping hunter dies" >:: fun _ ->
       let w, o = step (world (mk 55. 55.)) Vec2d.zero in
-      assert_bool "player should be dead" (not (World.player w).alive);
+      assert_bool "hider should be dead" (not (World.hider w).alive);
       assert_outcome Game.Defeat o );
-    ( "player moving into hunter dies" >:: fun _ ->
+    ( "hider moving into hunter dies" >:: fun _ ->
       let _, o = step (world (mk 35. 50.)) right in
       assert_outcome Game.Defeat o );
     ( "flush against hunter is not a touch" >:: fun _ ->
       let w, o = step (world (mk 40. 50.)) Vec2d.zero in
-      assert_bool "player should be alive" (World.player w).alive;
+      assert_bool "hider should be alive" (World.hider w).alive;
       assert_outcome Game.Mid_game o );
     ( "touching any one of several hunters kills" >:: fun _ ->
       let far = mk ~id:2 ~role:Entity.Hunter 300. 300. in
       let _, o = step (world ~hunters:[ far; hunter ] (mk 55. 55.)) Vec2d.zero in
       assert_outcome Game.Defeat o );
-    ( "dead player does not move and stays defeated" >:: fun _ ->
+    ( "dead hider does not move and stays defeated" >:: fun _ ->
       let dead = { (mk 0. 0.) with alive = false } in
       let w, o = step (world ~hunters:[] dead) right in
-      assert_pos ~x:0. ~y:0. (World.player w);
+      assert_pos ~x:0. ~y:0. (World.hider w);
       assert_outcome Game.Defeat o );
     ( "hunters move using the strategy" >:: fun _ ->
       let w, _ = step ~strat:(module Left) (world (mk 0. 200.)) Vec2d.zero in
       assert_pos ~x:40. ~y:50. (List.hd (World.hunters w)) );
-    ( "hunter walking into a standing player kills" >:: fun _ ->
+    ( "hunter walking into a standing hider kills" >:: fun _ ->
       let _, o = step ~strat:(module Left) (world (mk 35. 50.)) Vec2d.zero in
       assert_outcome Game.Defeat o );
     ( "default world starts in play" >:: fun _ ->

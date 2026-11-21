@@ -1,10 +1,10 @@
-type t = { walls : Rect.t list; player : Entity.t; hunters : Entity.t list }
+type t = { walls : Rect.t list; hider : Entity.t; hunters : Entity.t list }
 
-let init ~walls ~player ~hunters = { walls; player; hunters }
+let init ~walls ~hider ~hunters = { walls; hider; hunters }
 let walls w = w.walls
-let player w = w.player
+let hider w = w.hider
 let hunters w = w.hunters
-let with_player w player = { w with player }
+let with_hider w hider = { w with hider }
 let with_hunters w hunters = { w with hunters }
 
 let rect x y w h = Rect.{ pos = Vec2d.{ x; y }; w; h }
@@ -25,6 +25,6 @@ let default =
   in
   {
     walls;
-    player = entity 0 Entity.Hider 50. 50.;
+    hider = entity 0 Entity.Hider 50. 50.;
     hunters = [ entity 1 Entity.Hunter 330. 330. ];
   }
