@@ -1,7 +1,7 @@
 let string_of_outcome = function
-  | Game.Victory -> "Victory"
-  | Game.Defeat -> "Defeat"
-  | Game.Mid_game -> "Mid_game"
+  | Game.Hunters_win -> "Hunters_win"
+  | Game.Hiders_win -> "Hiders_win"
+  | Game.Ongoing -> "Ongoing"
 
 let coords (e : Entity.t) = Printf.sprintf "(%.1f, %.1f)" e.pos.x e.pos.y
 

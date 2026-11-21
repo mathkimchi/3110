@@ -1,6 +1,6 @@
 (* game.ml *)
 
-type outcome = Victory | Defeat | Mid_game
+type outcome = Hunters_win | Hiders_win | Ongoing
 
 (* true if [e] overlaps any living hunter *)
 let caught hunters (e : Entity.t) =
@@ -22,23 +22,18 @@ let world g = g.world
 
 let step g dt =
   let w = g.world in
-  if not (any_alive (World.hiders w)) then (g, Defeat)
+  if not (any_alive (World.hiders w)) then (g, Hunters_win)
   else
     let walls = World.walls w in
-    (* moves the living entities of [role], each by its own strategy, all
-       deciding from [w] *)
-    let move role w =
+    (* everyone decides from the same snapshot [w], then everyone moves *)
+    let w =
       World.with_entities w
         (List.map2
            (fun (e : Entity.t) strat ->
              let module S = (val strat : Strategy.S) in
-             if e.role = role && e.alive then
-               Physics.move walls e (S.decide w e) dt
-             else e)
+             if e.alive then Physics.move walls e (S.decide w e) dt else e)
            (World.entities w) g.strategies)
     in
-    (* hiders move first, so hunters decide based on where the hiders are now *)
-    let w = move Hunter (move Hider w) in
     (* check after everyone has moved, so a hunter walking into a hider counts *)
     let hunters = World.hunters w in
     let w =
@@ -51,4 +46,4 @@ let step g dt =
            (World.entities w))
     in
     let g = { g with world = w } in
-    if any_alive (World.hiders w) then (g, Mid_game) else (g, Defeat)
+    if any_alive (World.hiders w) then (g, Ongoing) else (g, Hunters_win)

@@ -90,9 +90,9 @@ let step ?(strat = (module Strategy.Stay : Strategy.S)) w dir =
   (Game.world g, o)
 
 let string_of_outcome = function
-  | Game.Victory -> "Victory"
-  | Game.Defeat -> "Defeat"
-  | Game.Mid_game -> "Mid_game"
+  | Game.Hunters_win -> "Hunters_win"
+  | Game.Hiders_win -> "Hiders_win"
+  | Game.Ongoing -> "Ongoing"
 
 let assert_outcome expected actual =
   assert_equal ~printer:string_of_outcome expected actual
@@ -102,7 +102,7 @@ let game_tests =
     ( "no input means no movement" >:: fun _ ->
       let w, o = step (world (mk 0. 0.)) Vec2d.zero in
       assert_pos ~x:0. ~y:0. (first_hider w);
-      assert_outcome Game.Mid_game o );
+      assert_outcome Game.Ongoing o );
     ( "input moves the hider, Stay hunter stays" >:: fun _ ->
       let w, _ = step (world (mk 0. 0.)) right in
       assert_pos ~x:10. ~y:0. (first_hider w);
@@ -113,29 +113,29 @@ let game_tests =
     ( "hider overlapping hunter dies" >:: fun _ ->
       let w, o = step (world (mk 55. 55.)) Vec2d.zero in
       assert_bool "hider should be dead" (not (first_hider w).alive);
-      assert_outcome Game.Defeat o );
+      assert_outcome Game.Hunters_win o );
     ( "hider moving into hunter dies" >:: fun _ ->
       let _, o = step (world (mk 35. 50.)) right in
-      assert_outcome Game.Defeat o );
+      assert_outcome Game.Hunters_win o );
     ( "flush against hunter is not a touch" >:: fun _ ->
       let w, o = step (world (mk 40. 50.)) Vec2d.zero in
       assert_bool "hider should be alive" (first_hider w).alive;
-      assert_outcome Game.Mid_game o );
+      assert_outcome Game.Ongoing o );
     ( "touching any one of several hunters kills" >:: fun _ ->
       let far = mk ~id:2 ~role:Entity.Hunter 300. 300. in
       let _, o = step (world ~hunters:[ far; hunter ] (mk 55. 55.)) Vec2d.zero in
-      assert_outcome Game.Defeat o );
-    ( "dead hider does not move and stays defeated" >:: fun _ ->
+      assert_outcome Game.Hunters_win o );
+    ( "dead hider does not move and hunters have won" >:: fun _ ->
       let dead = { (mk 0. 0.) with alive = false } in
       let w, o = step (world ~hunters:[] dead) right in
       assert_pos ~x:0. ~y:0. (first_hider w);
-      assert_outcome Game.Defeat o );
+      assert_outcome Game.Hunters_win o );
     ( "hunters move using the strategy" >:: fun _ ->
       let w, _ = step ~strat:(module Left) (world (mk 0. 200.)) Vec2d.zero in
       assert_pos ~x:40. ~y:50. (List.hd (World.hunters w)) );
     ( "hunter walking into a standing hider kills" >:: fun _ ->
       let _, o = step ~strat:(module Left) (world (mk 35. 50.)) Vec2d.zero in
-      assert_outcome Game.Defeat o );
+      assert_outcome Game.Hunters_win o );
     ( "input moves every hider" >:: fun _ ->
       let h2 = mk ~id:2 0. 100. in
       let w = World.init ~walls:[] ~entities:[ mk 0. 0.; h2 ] in
@@ -149,12 +149,12 @@ let game_tests =
       let w, o = step w Vec2d.zero in
       let alive = List.map (fun (e : Entity.t) -> e.alive) (World.hiders w) in
       assert_equal ~printer:(fun l -> String.concat "," (List.map string_of_bool l)) [ false; true ] alive;
-      assert_outcome Game.Mid_game o );
-    ( "all hiders caught is defeat" >:: fun _ ->
+      assert_outcome Game.Ongoing o );
+    ( "all hiders caught: hunters win" >:: fun _ ->
       let h2 = mk ~id:2 45. 45. in
       let w = World.init ~walls:[] ~entities:[ mk 55. 55.; h2; hunter ] in
       let _, o = step w Vec2d.zero in
-      assert_outcome Game.Defeat o );
+      assert_outcome Game.Hunters_win o );
     ( "each entity uses its own strategy" >:: fun _ ->
       let h2 = mk ~id:2 ~role:Entity.Hunter 200. 200. in
       let w = World.init ~walls:[] ~entities:[ mk 0. 0.; hunter; h2 ] in
@@ -177,9 +177,27 @@ let game_tests =
       assert_raises
         (Invalid_argument "Game.init: need exactly one strategy per entity")
         (fun () -> Game.init (world ~hunters:[] (mk 0. 0.)) [ s; s ]) );
+    ( "everyone decides from the same snapshot" >:: fun _ ->
+      (* the hunter heads for where the first hider is; if it saw the hider
+         after its move it would head diagonally instead of straight down *)
+      let chase : (module Strategy.S) =
+        (module struct
+          let decide w (e : Entity.t) =
+            let h = List.hd (World.hiders w) in
+            Vec2d.add h.pos (Vec2d.scale (-1.) e.pos)
+        end)
+      in
+      let u = mk ~id:1 ~role:Entity.Hunter 0. 0. in
+      let w = World.init ~walls:[] ~entities:[ mk 0. 100.; u ] in
+      let g, _ = Game.step (Game.init w [ toward right; chase ]) dt in
+      assert_pos ~x:0. ~y:10. (List.hd (World.hunters (Game.world g))) );
+    ( "dead hunter does not move" >:: fun _ ->
+      let dead = { hunter with alive = false } in
+      let w, _ = step ~strat:(module Left) (world ~hunters:[ dead ] (mk 0. 200.)) Vec2d.zero in
+      assert_pos ~x:50. ~y:50. (List.hd (World.hunters w)) );
     ( "default world starts in play" >:: fun _ ->
       let _, o = step World.default Vec2d.zero in
-      assert_outcome Game.Mid_game o );
+      assert_outcome Game.Ongoing o );
   ]
 
 (* ---------- World ---------- *)

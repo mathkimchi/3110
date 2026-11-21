@@ -10,7 +10,7 @@ let draw w outcome =
 let rec loop g outcome =
   if not (Raylib.window_should_close ()) then begin
     let g, outcome =
-      if outcome = Game.Mid_game then Game.step g (Raylib.get_frame_time ())
+      if outcome = Game.Ongoing then Game.step g (Raylib.get_frame_time ())
       else (g, outcome)
     in
     draw (Game.world g) outcome;
@@ -30,5 +30,5 @@ let () =
     Game.init World.default
       [ (module User_input_strategy); (module Strategy.Stay) ]
   in
-  loop g Game.Mid_game;
+  loop g Game.Ongoing;
   Raylib.close_window ()
