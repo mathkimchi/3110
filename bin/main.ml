@@ -1,36 +1,34 @@
 open Hideseek
 
-(* each key press advances the game by 1/12 s; at speed 120 that's 10 px *)
-let dt = 1. /. 12.
+let draw w outcome =
+  Raylib.begin_drawing ();
+  Raylib.clear_background Raylib.Color.raywhite;
+  Raylib.draw_text (Display.render w outcome) 10 10 20 Raylib.Color.black;
+  Raylib.end_drawing ()
 
-let direction_of_char = function
-  | 'w' -> Vec2d.{ x = 0.; y = -1. }
-  | 'a' -> Vec2d.{ x = -1.; y = 0. }
-  | 's' -> Vec2d.{ x = 0.; y = 1. }
-  | 'd' -> Vec2d.{ x = 1.; y = 0. }
-  | _ -> Vec2d.zero
-
-(* "wd" -> up + right; Physics.move normalizes, so diagonals aren't faster *)
-let direction_of_key key =
-  String.fold_left
-    (fun acc c -> Vec2d.add acc (direction_of_char c))
-    Vec2d.zero key
-
-let rec loop w =
-  print_string "> ";
-  match String.trim (read_line ()) with
-  | exception End_of_file -> () (* Ctrl-D *)
-  | "q" -> ()
-  | key ->
-      let w, outcome =
-        Game.step (module Strategy.Stay) w (direction_of_key key) dt
-      in
-      print_endline (Display.render w outcome);
-      if outcome = Game.Mid_game then loop w
+(* one iteration per frame; once the game is over the world stops changing *)
+let rec loop g outcome =
+  if not (Raylib.window_should_close ()) then begin
+    let g, outcome =
+      if outcome = Game.Ongoing then Game.step g (Raylib.get_frame_time ())
+      else (g, outcome)
+    in
+    draw (Game.world g) outcome;
+    loop g outcome
+  end
 
 let () =
-  print_endline
-    "w/a/s/d + Enter to move (combine for diagonals, e.g. wd), Enter to wait, \
-     q to quit";
-  print_endline (Display.render World.default Game.Mid_game);
-  loop World.default
+  (* a fixed-size window (min = max size) never shows up under some tiling
+     compositors via xwayland-satellite; resizable windows do *)
+  Raylib.set_config_flags Raylib.ConfigFlags.window_resizable;
+  Raylib.init_window 400 400 "hideseek";
+  Raylib.set_target_fps 60;
+  (* Raylib quits on Esc by default; Q matches the old terminal prototype *)
+  Raylib.set_exit_key Raylib.Key.Q;
+  (* World.default is [ hider 0; hunter 1 ]: the keyboard drives the hider *)
+  let g =
+    Game.init World.default
+      [ (module User_input_strategy); (module Strategy.Stay) ]
+  in
+  loop g Game.Ongoing;
+  Raylib.close_window ()

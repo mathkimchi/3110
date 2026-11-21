@@ -63,21 +63,36 @@ let physics_tests =
 (* ---------- Game.step ---------- *)
 
 let hunter = mk ~id:1 ~role:Entity.Hunter 50. 50.
-let world ?(walls = []) ?(hunters = [ hunter ]) player =
-  World.init ~walls ~player ~hunters
+let world ?(walls = []) ?(hunters = [ hunter ]) hider =
+  World.init ~walls ~entities:(hider :: hunters)
+
+(* the first hider; most tests have exactly one *)
+let first_hider w = List.hd (World.hiders w)
 
 (* a test-only strategy: every hunter always walks left *)
 module Left : Strategy.S = struct
   let decide _ _ = left
 end
 
+(* a test-only strategy that always heads in [dir] *)
+let toward dir : (module Strategy.S) =
+  (module struct
+    let decide _ _ = dir
+  end)
+
+(* one step where every hider heads in [dir] and every hunter uses [strat] *)
 let step ?(strat = (module Strategy.Stay : Strategy.S)) w dir =
-  Game.step strat w dir dt
+  let strat_of (e : Entity.t) =
+    match e.role with Entity.Hider -> toward dir | Entity.Hunter -> strat
+  in
+  let g = Game.init w (List.map strat_of (World.entities w)) in
+  let g, o = Game.step g dt in
+  (Game.world g, o)
 
 let string_of_outcome = function
-  | Game.Victory -> "Victory"
-  | Game.Defeat -> "Defeat"
-  | Game.Mid_game -> "Mid_game"
+  | Game.Hunters_win -> "Hunters_win"
+  | Game.Hiders_win -> "Hiders_win"
+  | Game.Ongoing -> "Ongoing"
 
 let assert_outcome expected actual =
   assert_equal ~printer:string_of_outcome expected actual
@@ -86,44 +101,123 @@ let game_tests =
   [
     ( "no input means no movement" >:: fun _ ->
       let w, o = step (world (mk 0. 0.)) Vec2d.zero in
-      assert_pos ~x:0. ~y:0. (World.player w);
-      assert_outcome Game.Mid_game o );
-    ( "input moves the player, Stay hunter stays" >:: fun _ ->
+      assert_pos ~x:0. ~y:0. (first_hider w);
+      assert_outcome Game.Ongoing o );
+    ( "input moves the hider, Stay hunter stays" >:: fun _ ->
       let w, _ = step (world (mk 0. 0.)) right in
-      assert_pos ~x:10. ~y:0. (World.player w);
+      assert_pos ~x:10. ~y:0. (first_hider w);
       assert_pos ~x:50. ~y:50. (List.hd (World.hunters w)) );
     ( "step uses the world's walls" >:: fun _ ->
       let w, _ = step (world ~walls:[ wall ] ~hunters:[] (mk 85. 50.)) right in
-      assert_pos ~x:90. ~y:50. (World.player w) );
-    ( "player overlapping hunter dies" >:: fun _ ->
+      assert_pos ~x:90. ~y:50. (first_hider w) );
+    ( "hider overlapping hunter dies" >:: fun _ ->
       let w, o = step (world (mk 55. 55.)) Vec2d.zero in
-      assert_bool "player should be dead" (not (World.player w).alive);
-      assert_outcome Game.Defeat o );
-    ( "player moving into hunter dies" >:: fun _ ->
+      assert_bool "hider should be dead" (not (first_hider w).alive);
+      assert_outcome Game.Hunters_win o );
+    ( "hider moving into hunter dies" >:: fun _ ->
       let _, o = step (world (mk 35. 50.)) right in
-      assert_outcome Game.Defeat o );
+      assert_outcome Game.Hunters_win o );
     ( "flush against hunter is not a touch" >:: fun _ ->
       let w, o = step (world (mk 40. 50.)) Vec2d.zero in
-      assert_bool "player should be alive" (World.player w).alive;
-      assert_outcome Game.Mid_game o );
+      assert_bool "hider should be alive" (first_hider w).alive;
+      assert_outcome Game.Ongoing o );
     ( "touching any one of several hunters kills" >:: fun _ ->
       let far = mk ~id:2 ~role:Entity.Hunter 300. 300. in
       let _, o = step (world ~hunters:[ far; hunter ] (mk 55. 55.)) Vec2d.zero in
-      assert_outcome Game.Defeat o );
-    ( "dead player does not move and stays defeated" >:: fun _ ->
+      assert_outcome Game.Hunters_win o );
+    ( "dead hider does not move and hunters have won" >:: fun _ ->
       let dead = { (mk 0. 0.) with alive = false } in
       let w, o = step (world ~hunters:[] dead) right in
-      assert_pos ~x:0. ~y:0. (World.player w);
-      assert_outcome Game.Defeat o );
+      assert_pos ~x:0. ~y:0. (first_hider w);
+      assert_outcome Game.Hunters_win o );
     ( "hunters move using the strategy" >:: fun _ ->
       let w, _ = step ~strat:(module Left) (world (mk 0. 200.)) Vec2d.zero in
       assert_pos ~x:40. ~y:50. (List.hd (World.hunters w)) );
-    ( "hunter walking into a standing player kills" >:: fun _ ->
+    ( "hunter walking into a standing hider kills" >:: fun _ ->
       let _, o = step ~strat:(module Left) (world (mk 35. 50.)) Vec2d.zero in
-      assert_outcome Game.Defeat o );
+      assert_outcome Game.Hunters_win o );
+    ( "input moves every hider" >:: fun _ ->
+      let h2 = mk ~id:2 0. 100. in
+      let w = World.init ~walls:[] ~entities:[ mk 0. 0.; h2 ] in
+      let w, _ = step w right in
+      match World.hiders w with
+      | [ a; b ] -> assert_pos ~x:10. ~y:0. a; assert_pos ~x:10. ~y:100. b
+      | _ -> assert_failure "expected two hiders" );
+    ( "one of two hiders caught: game goes on" >:: fun _ ->
+      let safe = mk ~id:2 300. 300. in
+      let w = World.init ~walls:[] ~entities:[ mk 55. 55.; safe; hunter ] in
+      let w, o = step w Vec2d.zero in
+      let alive = List.map (fun (e : Entity.t) -> e.alive) (World.hiders w) in
+      assert_equal ~printer:(fun l -> String.concat "," (List.map string_of_bool l)) [ false; true ] alive;
+      assert_outcome Game.Ongoing o );
+    ( "all hiders caught: hunters win" >:: fun _ ->
+      let h2 = mk ~id:2 45. 45. in
+      let w = World.init ~walls:[] ~entities:[ mk 55. 55.; h2; hunter ] in
+      let _, o = step w Vec2d.zero in
+      assert_outcome Game.Hunters_win o );
+    ( "each entity uses its own strategy" >:: fun _ ->
+      let h2 = mk ~id:2 ~role:Entity.Hunter 200. 200. in
+      let w = World.init ~walls:[] ~entities:[ mk 0. 0.; hunter; h2 ] in
+      let g =
+        Game.init w [ toward down; (module Left); (module Strategy.Stay) ]
+      in
+      let g, _ = Game.step g dt in
+      match World.entities (Game.world g) with
+      | [ a; b; c ] ->
+          assert_pos ~x:0. ~y:10. a;
+          assert_pos ~x:40. ~y:50. b;
+          assert_pos ~x:200. ~y:200. c
+      | _ -> assert_failure "expected three entities" );
+    ( "init rejects too few strategies" >:: fun _ ->
+      assert_raises
+        (Invalid_argument "Game.init: need exactly one strategy per entity")
+        (fun () -> Game.init (world (mk 0. 0.)) [ toward right ]) );
+    ( "init rejects too many strategies" >:: fun _ ->
+      let s = (module Strategy.Stay : Strategy.S) in
+      assert_raises
+        (Invalid_argument "Game.init: need exactly one strategy per entity")
+        (fun () -> Game.init (world ~hunters:[] (mk 0. 0.)) [ s; s ]) );
+    ( "everyone decides from the same snapshot" >:: fun _ ->
+      (* the hunter heads for where the first hider is; if it saw the hider
+         after its move it would head diagonally instead of straight down *)
+      let chase : (module Strategy.S) =
+        (module struct
+          let decide w (e : Entity.t) =
+            let h = List.hd (World.hiders w) in
+            Vec2d.add h.pos (Vec2d.scale (-1.) e.pos)
+        end)
+      in
+      let u = mk ~id:1 ~role:Entity.Hunter 0. 0. in
+      let w = World.init ~walls:[] ~entities:[ mk 0. 100.; u ] in
+      let g, _ = Game.step (Game.init w [ toward right; chase ]) dt in
+      assert_pos ~x:0. ~y:10. (List.hd (World.hunters (Game.world g))) );
+    ( "dead hunter does not move" >:: fun _ ->
+      let dead = { hunter with alive = false } in
+      let w, _ = step ~strat:(module Left) (world ~hunters:[ dead ] (mk 0. 200.)) Vec2d.zero in
+      assert_pos ~x:50. ~y:50. (List.hd (World.hunters w)) );
     ( "default world starts in play" >:: fun _ ->
       let _, o = step World.default Vec2d.zero in
-      assert_outcome Game.Mid_game o );
+      assert_outcome Game.Ongoing o );
+  ]
+
+(* ---------- World ---------- *)
+
+let world_tests =
+  let h0 = mk ~id:0 0. 0. and u1 = mk ~id:1 ~role:Entity.Hunter 0. 0. in
+  let h2 = mk ~id:2 0. 0. in
+  let w = World.init ~walls:[] ~entities:[ h0; u1; h2 ] in
+  let ids es = List.map (fun (e : Entity.t) -> e.id) es in
+  let ids_test name expected es =
+    name >:: fun _ ->
+    assert_equal ~printer:(fun l -> String.concat "," (List.map string_of_int l))
+      expected (ids es)
+  in
+  [
+    ids_test "entities keeps order" [ 0; 1; 2 ] (World.entities w);
+    ids_test "hiders" [ 0; 2 ] (World.hiders w);
+    ids_test "hunters" [ 1 ] (World.hunters w);
+    ids_test "entities_by_role Hider" [ 0; 2 ] (World.entities_by_role w Entity.Hider);
+    ids_test "no hunters" [] (World.hunters (World.init ~walls:[] ~entities:[ h0 ]));
   ]
 
 (* ---------- Strategy ---------- *)
@@ -137,8 +231,37 @@ let strategy_tests =
       assert_equal ~cmp:feq ~printer:string_of_float ~msg:"y" 0. dir.y );
   ]
 
+(* ---------- User_input_strategy ---------- *)
+
+(* [keys_test name held ~x ~y]: holding exactly the keys [held] gives (x, y) *)
+let keys_test name held ~x ~y =
+  name >:: fun _ ->
+  let dir = User_input_strategy.direction_of_keys (fun k -> List.mem k held) in
+  assert_equal ~cmp:feq ~printer:string_of_float ~msg:"x" x dir.x;
+  assert_equal ~cmp:feq ~printer:string_of_float ~msg:"y" y dir.y
+
+let user_input_strategy_tests =
+  Raylib.Key.
+    [
+      keys_test "no keys" [] ~x:0. ~y:0.;
+      keys_test "W is up" [ W ] ~x:0. ~y:(-1.);
+      keys_test "A is left" [ A ] ~x:(-1.) ~y:0.;
+      keys_test "S is down" [ S ] ~x:0. ~y:1.;
+      keys_test "D is right" [ D ] ~x:1. ~y:0.;
+      keys_test "W+D is up-right" [ W; D ] ~x:1. ~y:(-1.);
+      keys_test "A+D cancel" [ A; D ] ~x:0. ~y:0.;
+      keys_test "all four cancel" [ W; A; S; D ] ~x:0. ~y:0.;
+      keys_test "Up is up" [ Up ] ~x:0. ~y:(-1.);
+      keys_test "Left is left" [ Left ] ~x:(-1.) ~y:0.;
+      keys_test "Down is down" [ Down ] ~x:0. ~y:1.;
+      keys_test "Right is right" [ Right ] ~x:1. ~y:0.;
+      keys_test "arrow and letter mix" [ W; Right ] ~x:1. ~y:(-1.);
+      keys_test "other keys ignored" [ Q; Space ] ~x:0. ~y:0.;
+    ]
+
 let suite =
   "hideseek" >::: [ "physics" >::: physics_tests; "game" >::: game_tests;
-    "strategy" >::: strategy_tests ]
+    "world" >::: world_tests; "strategy" >::: strategy_tests;
+    "user_input_strategy" >::: user_input_strategy_tests ]
 
 let () = run_test_tt_main suite
