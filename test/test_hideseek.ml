@@ -63,6 +63,9 @@ let physics_tests =
 (* ---------- Game.step ---------- *)
 
 let hunter = mk ~id:1 ~role:Entity.Hunter 50. 50.
+(* long enough that no test runs out of time unless it means to *)
+let long = 1000.
+
 let world ?(walls = []) ?(hunters = [ hunter ]) hider =
   World.init ~walls ~entities:(hider :: hunters)
 
@@ -85,7 +88,7 @@ let step ?(strat = (module Strategy.Stay : Strategy.S)) w dir =
   let strat_of (e : Entity.t) =
     match e.role with Entity.Hider -> toward dir | Entity.Hunter -> strat
   in
-  let g = Game.init w (List.map strat_of (World.entities w)) in
+  let g = Game.init ~time_limit:long w (List.map strat_of (World.entities w)) in
   let g, o = Game.step g dt in
   (Game.world g, o)
 
@@ -159,7 +162,7 @@ let game_tests =
       let h2 = mk ~id:2 ~role:Entity.Hunter 200. 200. in
       let w = World.init ~walls:[] ~entities:[ mk 0. 0.; hunter; h2 ] in
       let g =
-        Game.init w [ toward down; (module Left); (module Strategy.Stay) ]
+        Game.init ~time_limit:long w [ toward down; (module Left); (module Strategy.Stay) ]
       in
       let g, _ = Game.step g dt in
       match World.entities (Game.world g) with
@@ -171,12 +174,12 @@ let game_tests =
     ( "init rejects too few strategies" >:: fun _ ->
       assert_raises
         (Invalid_argument "Game.init: need exactly one strategy per entity")
-        (fun () -> Game.init (world (mk 0. 0.)) [ toward right ]) );
+        (fun () -> Game.init ~time_limit:long (world (mk 0. 0.)) [ toward right ]) );
     ( "init rejects too many strategies" >:: fun _ ->
       let s = (module Strategy.Stay : Strategy.S) in
       assert_raises
         (Invalid_argument "Game.init: need exactly one strategy per entity")
-        (fun () -> Game.init (world ~hunters:[] (mk 0. 0.)) [ s; s ]) );
+        (fun () -> Game.init ~time_limit:long (world ~hunters:[] (mk 0. 0.)) [ s; s ]) );
     ( "everyone decides from the same snapshot" >:: fun _ ->
       (* the hunter heads for where the first hider is; if it saw the hider
          after its move it would head diagonally instead of straight down *)
@@ -189,7 +192,7 @@ let game_tests =
       in
       let u = mk ~id:1 ~role:Entity.Hunter 0. 0. in
       let w = World.init ~walls:[] ~entities:[ mk 0. 100.; u ] in
-      let g, _ = Game.step (Game.init w [ toward right; chase ]) dt in
+      let g, _ = Game.step (Game.init ~time_limit:long w [ toward right; chase ]) dt in
       assert_pos ~x:0. ~y:10. (List.hd (World.hunters (Game.world g))) );
     ( "dead hunter does not move" >:: fun _ ->
       let dead = { hunter with alive = false } in
@@ -198,6 +201,72 @@ let game_tests =
     ( "default world starts in play" >:: fun _ ->
       let _, o = step World.default Vec2d.zero in
       assert_outcome Game.Ongoing o );
+  ]
+
+(* ---------- Game timer ---------- *)
+
+(* a game where every hider heads in [dir] and every hunter stays *)
+let timed ~time_limit ?(dir = Vec2d.zero) w =
+  let strat_of (e : Entity.t) =
+    match e.role with
+    | Entity.Hider -> toward dir
+    | Entity.Hunter -> (module Strategy.Stay : Strategy.S)
+  in
+  Game.init ~time_limit w (List.map strat_of (World.entities w))
+
+let assert_time expected g =
+  assert_equal ~cmp:feq ~printer:string_of_float ~msg:"time_left" expected
+    (Game.time_left g)
+
+let timer_tests =
+  [
+    ( "time_left starts at the limit" >:: fun _ ->
+      assert_time 5. (timed ~time_limit:5. (world (mk 0. 0.))) );
+    ( "time_left counts down by dt" >:: fun _ ->
+      let g, _ = Game.step (timed ~time_limit:5. (world (mk 0. 0.))) dt in
+      assert_time (5. -. dt) g );
+    ( "time_left never goes below 0" >:: fun _ ->
+      let g, _ = Game.step (timed ~time_limit:(dt /. 2.) (world (mk 0. 0.))) dt in
+      assert_time 0. g );
+    ( "step that uses up the time still reports Ongoing" >:: fun _ ->
+      let _, o = Game.step (timed ~time_limit:dt (world (mk 0. 0.))) dt in
+      assert_outcome Game.Ongoing o );
+    ( "hiders win on the step after time runs out" >:: fun _ ->
+      let g, _ = Game.step (timed ~time_limit:dt (world (mk 0. 0.))) dt in
+      let _, o = Game.step g dt in
+      assert_outcome Game.Hiders_win o );
+    ( "nobody moves once time is up" >:: fun _ ->
+      let g = timed ~time_limit:dt ~dir:right (world ~hunters:[] (mk 0. 0.)) in
+      let g, _ = Game.step g dt in
+      let g, _ = Game.step g dt in
+      assert_pos ~x:10. ~y:0. (first_hider (Game.world g)) );
+    ( "catch on the step that uses up the time: hunters win" >:: fun _ ->
+      let _, o = Game.step (timed ~time_limit:dt (world (mk 55. 55.))) dt in
+      assert_outcome Game.Hunters_win o );
+    ( "hunters who already won stay winners after time is up" >:: fun _ ->
+      let g, _ = Game.step (timed ~time_limit:dt (world (mk 55. 55.))) dt in
+      let _, o = Game.step g dt in
+      assert_outcome Game.Hunters_win o );
+    ( "init rejects a zero time limit" >:: fun _ ->
+      assert_raises (Invalid_argument "Game.init: time_limit must be positive")
+        (fun () -> timed ~time_limit:0. (world (mk 0. 0.))) );
+    ( "init rejects a negative time limit" >:: fun _ ->
+      assert_raises (Invalid_argument "Game.init: time_limit must be positive")
+        (fun () -> timed ~time_limit:(-1.) (world (mk 0. 0.))) );
+  ]
+
+(* ---------- Display ---------- *)
+
+let display_tests =
+  let g = timed ~time_limit:5. (World.init ~walls:[] ~entities:[ mk 1. 2. ]) in
+  [
+    ( "render shows entities, time left, then status" >:: fun _ ->
+      assert_equal ~printer:Fun.id "Hider 0: (1.0, 2.0)\nTime left: 5.0\nStatus: Ongoing"
+        (Display.render g Game.Ongoing) );
+    ( "time left is shown with one decimal" >:: fun _ ->
+      let g, _ = Game.step g 1.3 in
+      assert_equal ~printer:Fun.id "Hider 0: (1.0, 2.0)\nTime left: 3.7\nStatus: Ongoing"
+        (Display.render g Game.Ongoing) );
   ]
 
 (* ---------- World ---------- *)
@@ -261,6 +330,7 @@ let user_input_strategy_tests =
 
 let suite =
   "hideseek" >::: [ "physics" >::: physics_tests; "game" >::: game_tests;
+    "timer" >::: timer_tests; "display" >::: display_tests;
     "world" >::: world_tests; "strategy" >::: strategy_tests;
     "user_input_strategy" >::: user_input_strategy_tests ]
 
