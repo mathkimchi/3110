@@ -17,7 +17,26 @@ let rec loop g outcome =
     loop g outcome
   end
 
+(* seconds the hiders must survive; settable with --time *)
+let time_limit = ref 20.
+
+let set_time t =
+  if t <= 0. then raise (Arg.Bad "--time must be greater than 0");
+  time_limit := t
+
+let speclist =
+  [
+    ( "--time",
+      Arg.Float set_time,
+      "SECONDS  how long the hiders must survive to win (default 20)" );
+  ]
+
+let usage = "game [--time=SECONDS]"
+
 let () =
+  Arg.parse speclist
+    (fun a -> raise (Arg.Bad ("unexpected argument " ^ a)))
+    usage;
   (* a fixed-size window (min = max size) never shows up under some tiling
      compositors via xwayland-satellite; resizable windows do *)
   Raylib.set_config_flags Raylib.ConfigFlags.window_resizable;
@@ -27,7 +46,7 @@ let () =
   Raylib.set_exit_key Raylib.Key.Q;
   (* World.default is [ hider 0; hunter 1 ]: the keyboard drives the hider *)
   let g =
-    Game.init ~time_limit:20. World.default
+    Game.init ~time_limit:!time_limit World.default
       [ (module User_input_strategy); (module Strategy.Stay) ]
   in
   loop g Game.Ongoing;
