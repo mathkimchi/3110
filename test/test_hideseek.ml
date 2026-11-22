@@ -23,6 +23,34 @@ let assert_pos ~x ~y (e : Entity.t) =
   assert_equal ~cmp:feq ~printer:string_of_float ~msg:"x" x e.pos.x;
   assert_equal ~cmp:feq ~printer:string_of_float ~msg:"y" y e.pos.y
 
+(* ---------- Vec2d ---------- *)
+
+let assert_vec ~x ~y (p : Vec2d.t) =
+  assert_equal ~cmp:feq ~printer:string_of_float ~msg:"x" x p.x;
+  assert_equal ~cmp:feq ~printer:string_of_float ~msg:"y" y p.y
+
+let vec2d_tests =
+  [
+    ("sub" >:: fun _ -> assert_vec ~x:(-2.) ~y:5. (Vec2d.sub (v 1. 7.) (v 3. 2.)));
+    ("sub self is zero" >:: fun _ -> assert_vec ~x:0. ~y:0. (Vec2d.sub (v 4. 4.) (v 4. 4.)));
+    ( "dist 3-4-5" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float 5. (Vec2d.dist (v 1. 1.) (v 4. 5.)) );
+    ( "dist is symmetric" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float 5. (Vec2d.dist (v 4. 5.) (v 1. 1.)) );
+    ( "dist to self is 0" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float 0. (Vec2d.dist (v 2. 3.) (v 2. 3.)) );
+  ]
+
+(* ---------- Rect ---------- *)
+
+let rect_tests =
+  [
+    ( "center of a square" >:: fun _ ->
+      assert_vec ~x:15. ~y:25. (Rect.center Rect.{ pos = v 10. 20.; w = 10.; h = 10. }) );
+    ( "center of a non-square" >:: fun _ ->
+      assert_vec ~x:20. ~y:3. (Rect.center Rect.{ pos = v 0. 0.; w = 40.; h = 6. }) );
+  ]
+
 (* ---------- Physics.move ---------- *)
 
 let wall = Rect.{ pos= { x = 100.; y = 0.;}; w = 20.; h = 200. } (* vertical, x 100..120 *)
@@ -300,6 +328,51 @@ let strategy_tests =
       assert_equal ~cmp:feq ~printer:string_of_float ~msg:"y" 0. dir.y );
   ]
 
+(* ---------- Greedy_strategy ---------- *)
+
+(* directions may have any length, so compare them normalized *)
+let assert_dir ~x ~y d =
+  let want = Vec2d.normalize (v x y) in
+  assert_vec ~x:want.x ~y:want.y (Vec2d.normalize d)
+
+(* [greedy_test name entities ~x ~y]: the first entity in [entities] decides
+   on a direction parallel to (x, y) *)
+let greedy_test name entities ~x ~y =
+  name >:: fun _ ->
+  let w = World.init ~walls:[] ~entities in
+  assert_dir ~x ~y (Greedy_strategy.decide w (List.hd entities))
+
+let hunter_at ?(id = 1) ?size x y = mk ~id ~role:Entity.Hunter ?size x y
+let hider_at ?(id = 0) ?size x y = mk ~id ?size x y
+let dead (e : Entity.t) = { e with alive = false }
+
+let greedy_strategy_tests =
+  [
+    greedy_test "hunter heads for the hider" [ hunter_at 0. 0.; hider_at 30. 40. ] ~x:3. ~y:4.;
+    greedy_test "hunter picks the closest hider"
+      [ hunter_at 0. 0.; hider_at ~id:0 100. 0.; hider_at ~id:2 0. (-50.) ] ~x:0. ~y:(-1.);
+    greedy_test "hunter ignores dead hiders"
+      [ hunter_at 0. 0.; dead (hider_at ~id:0 10. 0.); hider_at ~id:2 0. 100. ] ~x:0. ~y:1.;
+    greedy_test "hunter ignores other hunters"
+      [ hunter_at 0. 0.; hunter_at ~id:2 10. 0.; hider_at 0. 100. ] ~x:0. ~y:1.;
+    greedy_test "hider runs straight away" [ hider_at 0. 0.; hunter_at 30. 40. ] ~x:(-3.) ~y:(-4.);
+    greedy_test "hider flees the closest hunter"
+      [ hider_at 0. 0.; hunter_at ~id:1 100. 0.; hunter_at ~id:2 0. 50. ] ~x:0. ~y:(-1.);
+    greedy_test "hider ignores dead hunters"
+      [ hider_at 0. 0.; dead (hunter_at ~id:1 10. 0.); hunter_at ~id:2 0. 100. ] ~x:0. ~y:(-1.);
+    greedy_test "hider ignores other hiders"
+      [ hider_at 0. 0.; hider_at ~id:2 10. 0.; hunter_at 0. 100. ] ~x:0. ~y:(-1.);
+    greedy_test "tie goes to the first in order"
+      [ hunter_at 0. 0.; hider_at ~id:0 50. 0.; hider_at ~id:2 0. 50. ] ~x:1. ~y:0.;
+    (* hunter center (5, 5), hider center (15, 35); top-left corners would give (0, 20) *)
+    greedy_test "measures between centers"
+      [ hunter_at ~size:10. 0. 0.; hider_at ~size:30. 0. 20. ] ~x:10. ~y:30.;
+    greedy_test "hunter with no living hider stays"
+      [ hunter_at 0. 0.; dead (hider_at 10. 0.) ] ~x:0. ~y:0.;
+    greedy_test "hider with no hunters stays" [ hider_at 0. 0. ] ~x:0. ~y:0.;
+    greedy_test "same center as target stays" [ hunter_at 5. 5.; hider_at 5. 5. ] ~x:0. ~y:0.;
+  ]
+
 (* ---------- User_input_strategy ---------- *)
 
 (* [keys_test name held ~x ~y]: holding exactly the keys [held] gives (x, y) *)
@@ -329,9 +402,10 @@ let user_input_strategy_tests =
     ]
 
 let suite =
-  "hideseek" >::: [ "physics" >::: physics_tests; "game" >::: game_tests;
+  "hideseek" >::: [ "vec2d" >::: vec2d_tests; "rect" >::: rect_tests; "physics" >::: physics_tests; "game" >::: game_tests;
     "timer" >::: timer_tests; "display" >::: display_tests;
     "world" >::: world_tests; "strategy" >::: strategy_tests;
+    "greedy_strategy" >::: greedy_strategy_tests;
     "user_input_strategy" >::: user_input_strategy_tests ]
 
 let () = run_test_tt_main suite

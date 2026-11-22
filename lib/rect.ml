@@ -2,3 +2,6 @@
 type t = { pos: Vec2d.t; w : float; h : float }
 let overlaps a b =
   a.pos.x < b.pos.x +. b.w && b.pos.x < a.pos.x +. a.w && a.pos.y < b.pos.y +. b.h && b.pos.y < a.pos.y +. a.h
+
+(** [center r] is the point in the middle of [r] *)
+let center r = Vec2d.{ x = r.pos.x +. (r.w /. 2.); y = r.pos.y +. (r.h /. 2.) }
