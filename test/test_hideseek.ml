@@ -41,6 +41,16 @@ let vec2d_tests =
       assert_equal ~cmp:feq ~printer:string_of_float 0. (Vec2d.dist (v 2. 3.) (v 2. 3.)) );
   ]
 
+(* ---------- Rect ---------- *)
+
+let rect_tests =
+  [
+    ( "center of a square" >:: fun _ ->
+      assert_vec ~x:15. ~y:25. (Rect.center Rect.{ pos = v 10. 20.; w = 10.; h = 10. }) );
+    ( "center of a non-square" >:: fun _ ->
+      assert_vec ~x:20. ~y:3. (Rect.center Rect.{ pos = v 0. 0.; w = 40.; h = 6. }) );
+  ]
+
 (* ---------- Physics.move ---------- *)
 
 let wall = Rect.{ pos= { x = 100.; y = 0.;}; w = 20.; h = 200. } (* vertical, x 100..120 *)
@@ -347,7 +357,7 @@ let user_input_strategy_tests =
     ]
 
 let suite =
-  "hideseek" >::: [ "vec2d" >::: vec2d_tests; "physics" >::: physics_tests; "game" >::: game_tests;
+  "hideseek" >::: [ "vec2d" >::: vec2d_tests; "rect" >::: rect_tests; "physics" >::: physics_tests; "game" >::: game_tests;
     "timer" >::: timer_tests; "display" >::: display_tests;
     "world" >::: world_tests; "strategy" >::: strategy_tests;
     "user_input_strategy" >::: user_input_strategy_tests ]
