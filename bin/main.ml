@@ -3,6 +3,8 @@ open Hideseek
 let draw g outcome =
   Raylib.begin_drawing ();
   Raylib.clear_background Raylib.Color.raywhite;
+  Display.draw_world g;
+  Display.draw_entities g;
   Raylib.draw_text (Display.render g outcome) 10 10 20 Raylib.Color.black;
   Raylib.end_drawing ()
 
