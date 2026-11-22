@@ -44,10 +44,11 @@ let () =
   Raylib.set_target_fps 60;
   (* Raylib quits on Esc by default; Q matches the old terminal prototype *)
   Raylib.set_exit_key Raylib.Key.Q;
-  (* World.default is [ hider 0; hunter 1 ]: the keyboard drives the hider *)
+  (* World.default is [ hider 0; hunter 1 ]: the keyboard drives the hider
+     and the hunter chases it greedily *)
   let g =
     Game.init ~time_limit:!time_limit World.default
-      [ (module User_input_strategy); (module Strategy.Stay) ]
+      [ (module User_input_strategy); (module Greedy_strategy) ]
   in
   loop g Game.Ongoing;
   Raylib.close_window ()
