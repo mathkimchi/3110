@@ -1,9 +1,9 @@
 open Hideseek
 
-let draw w outcome =
+let draw g outcome =
   Raylib.begin_drawing ();
   Raylib.clear_background Raylib.Color.raywhite;
-  Raylib.draw_text (Display.render w outcome) 10 10 20 Raylib.Color.black;
+  Raylib.draw_text (Display.render g outcome) 10 10 20 Raylib.Color.black;
   Raylib.end_drawing ()
 
 (* one iteration per frame; once the game is over the world stops changing *)
@@ -13,7 +13,7 @@ let rec loop g outcome =
       if outcome = Game.Ongoing then Game.step g (Raylib.get_frame_time ())
       else (g, outcome)
     in
-    draw (Game.world g) outcome;
+    draw g outcome;
     loop g outcome
   end
 

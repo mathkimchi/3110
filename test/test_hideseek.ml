@@ -255,6 +255,20 @@ let timer_tests =
         (fun () -> timed ~time_limit:(-1.) (world (mk 0. 0.))) );
   ]
 
+(* ---------- Display ---------- *)
+
+let display_tests =
+  let g = timed ~time_limit:5. (World.init ~walls:[] ~entities:[ mk 1. 2. ]) in
+  [
+    ( "render shows entities, time left, then status" >:: fun _ ->
+      assert_equal ~printer:Fun.id "Hider 0: (1.0, 2.0)\nTime left: 5.0\nStatus: Ongoing"
+        (Display.render g Game.Ongoing) );
+    ( "time left is shown with one decimal" >:: fun _ ->
+      let g, _ = Game.step g 1.3 in
+      assert_equal ~printer:Fun.id "Hider 0: (1.0, 2.0)\nTime left: 3.7\nStatus: Ongoing"
+        (Display.render g Game.Ongoing) );
+  ]
+
 (* ---------- World ---------- *)
 
 let world_tests =
@@ -316,7 +330,7 @@ let user_input_strategy_tests =
 
 let suite =
   "hideseek" >::: [ "physics" >::: physics_tests; "game" >::: game_tests;
-    "timer" >::: timer_tests;
+    "timer" >::: timer_tests; "display" >::: display_tests;
     "world" >::: world_tests; "strategy" >::: strategy_tests;
     "user_input_strategy" >::: user_input_strategy_tests ]
 
