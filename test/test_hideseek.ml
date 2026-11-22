@@ -23,6 +23,24 @@ let assert_pos ~x ~y (e : Entity.t) =
   assert_equal ~cmp:feq ~printer:string_of_float ~msg:"x" x e.pos.x;
   assert_equal ~cmp:feq ~printer:string_of_float ~msg:"y" y e.pos.y
 
+(* ---------- Vec2d ---------- *)
+
+let assert_vec ~x ~y (p : Vec2d.t) =
+  assert_equal ~cmp:feq ~printer:string_of_float ~msg:"x" x p.x;
+  assert_equal ~cmp:feq ~printer:string_of_float ~msg:"y" y p.y
+
+let vec2d_tests =
+  [
+    ("sub" >:: fun _ -> assert_vec ~x:(-2.) ~y:5. (Vec2d.sub (v 1. 7.) (v 3. 2.)));
+    ("sub self is zero" >:: fun _ -> assert_vec ~x:0. ~y:0. (Vec2d.sub (v 4. 4.) (v 4. 4.)));
+    ( "dist 3-4-5" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float 5. (Vec2d.dist (v 1. 1.) (v 4. 5.)) );
+    ( "dist is symmetric" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float 5. (Vec2d.dist (v 4. 5.) (v 1. 1.)) );
+    ( "dist to self is 0" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float 0. (Vec2d.dist (v 2. 3.) (v 2. 3.)) );
+  ]
+
 (* ---------- Physics.move ---------- *)
 
 let wall = Rect.{ pos= { x = 100.; y = 0.;}; w = 20.; h = 200. } (* vertical, x 100..120 *)
@@ -329,7 +347,7 @@ let user_input_strategy_tests =
     ]
 
 let suite =
-  "hideseek" >::: [ "physics" >::: physics_tests; "game" >::: game_tests;
+  "hideseek" >::: [ "vec2d" >::: vec2d_tests; "physics" >::: physics_tests; "game" >::: game_tests;
     "timer" >::: timer_tests; "display" >::: display_tests;
     "world" >::: world_tests; "strategy" >::: strategy_tests;
     "user_input_strategy" >::: user_input_strategy_tests ]
