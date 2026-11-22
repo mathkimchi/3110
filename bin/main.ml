@@ -27,7 +27,7 @@ let () =
   Raylib.set_exit_key Raylib.Key.Q;
   (* World.default is [ hider 0; hunter 1 ]: the keyboard drives the hider *)
   let g =
-    Game.init World.default
+    Game.init ~time_limit:20. World.default
       [ (module User_input_strategy); (module Strategy.Stay) ]
   in
   loop g Game.Ongoing;

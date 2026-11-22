@@ -11,18 +11,27 @@ let caught hunters (e : Entity.t) =
 
 let any_alive es = List.exists (fun (e : Entity.t) -> e.alive) es
 
-type t = { world : World.t; strategies : (module Strategy.S) list }
+type t = {
+  world : World.t;
+  strategies : (module Strategy.S) list;
+  time_limit : float;
+  elapsed : float;  (** game seconds passed so far: the sum of every [dt] *)
+}
 
-let init world strategies =
+let init ~time_limit world strategies =
+  if time_limit <= 0. then invalid_arg "Game.init: time_limit must be positive";
   if List.length strategies <> List.length (World.entities world) then
     invalid_arg "Game.init: need exactly one strategy per entity";
-  { world; strategies }
+  { world; strategies; time_limit; elapsed = 0. }
 
 let world g = g.world
+let time_left g = Float.max 0. (g.time_limit -. g.elapsed)
 
 let step g dt =
   let w = g.world in
   if not (any_alive (World.hiders w)) then (g, Hunters_win)
+  (* time is checked before moving, so the step that uses it up still plays *)
+  else if g.elapsed >= g.time_limit then (g, Hiders_win)
   else
     let walls = World.walls w in
     (* everyone decides from the same snapshot [w], then everyone moves *)
@@ -45,5 +54,5 @@ let step g dt =
              else e)
            (World.entities w))
     in
-    let g = { g with world = w } in
+    let g = { g with world = w; elapsed = g.elapsed +. dt } in
     if any_alive (World.hiders w) then (g, Ongoing) else (g, Hunters_win)
