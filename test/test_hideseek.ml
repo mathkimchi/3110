@@ -703,6 +703,79 @@ let ppo_tests =
       assert_equal ~cmp:feq l l' );
   ]
 
+(* ---------- Trainer PPO rounds ---------- *)
+
+let ppo_round ?(time_limit = 2.) ~hider ~hunter () =
+  let ag seed = Some (Ppo.init (Random.State.make [| seed |])) in
+  Trainer.play_ppo (Random.State.make [| 0 |]) ~time_limit
+    ~hider:(if hider then ag 1 else None)
+    ~hunter:(if hunter then ag 2 else None)
+    World.default
+
+let check ~h ~u ~out ~input () =
+  Trainer.check_files ~hider_ppo:h ~hunter_ppo:u ~out ~input
+
+let trainer_ppo_tests =
+  [
+    ( "step_reward is +-dist/arena*dt" >:: fun _ ->
+      (* centers (35, 75) and (195, 395): dist = sqrt (160^2 + 320^2) *)
+      let r = sqrt ((160. ** 2.) +. (320. ** 2.)) /. 400. *. Trainer.dt in
+      assert_equal ~cmp:feq ~printer:string_of_float r
+        (Trainer.step_reward ppo_world Entity.Hider);
+      assert_equal ~cmp:feq ~printer:string_of_float (-.r)
+        (Trainer.step_reward ppo_world Entity.Hunter) );
+    ( "end_reward" >:: fun _ ->
+      assert_equal 1. (Trainer.end_reward Game.Hiders_win Entity.Hider);
+      assert_equal (-1.) (Trainer.end_reward Game.Hiders_win Entity.Hunter);
+      assert_equal 1. (Trainer.end_reward Game.Hunters_win Entity.Hunter);
+      assert_equal (-1.) (Trainer.end_reward Game.Hunters_win Entity.Hider);
+      assert_equal 0. (Trainer.end_reward Game.Ongoing Entity.Hider) );
+    ( "play_ppo both ppo: one sample per step each" >:: fun _ ->
+      let o, secs, ex = ppo_round ~hider:true ~hunter:true () in
+      assert_bool "finished" (o <> Game.Ongoing);
+      let steps = int_of_float (Float.round (secs /. Trainer.dt)) in
+      assert_equal ~printer:string_of_int steps (Array.length ex.hunter);
+      assert_equal ~printer:string_of_int steps (Array.length ex.hider) );
+    ( "play_ppo greedy hunter has no samples" >:: fun _ ->
+      let _, _, ex = ppo_round ~hider:true ~hunter:false () in
+      assert_equal 0 (Array.length ex.hunter);
+      assert_bool "hider has samples" (Array.length ex.hider > 0) );
+    ( "play_ppo greedy hider has no samples" >:: fun _ ->
+      let _, _, ex = ppo_round ~hider:false ~hunter:true () in
+      assert_equal 0 (Array.length ex.hider);
+      assert_bool "hunter has samples" (Array.length ex.hunter > 0) );
+    ( "play_ppo is reproducible" >:: fun _ ->
+      let o1, s1, e1 = ppo_round ~hider:true ~hunter:true () in
+      let o2, s2, e2 = ppo_round ~hider:true ~hunter:true () in
+      assert_equal o1 o2;
+      assert_equal ~cmp:feq s1 s2;
+      assert_floats
+        (Array.map (fun (s : Ppo.sample) -> s.ret) e1.hider)
+        (Array.map (fun (s : Ppo.sample) -> s.ret) e2.hider) );
+    ( "play_ppo rejects two hiders" >:: fun _ ->
+      let w =
+        World.init ~walls:[]
+          ~entities:[ mk ~role:Entity.Hider 0. 0.; mk ~id:1 ~role:Entity.Hider 50. 50. ]
+      in
+      assert_raises
+        (Invalid_argument "Trainer.play_ppo: need exactly one hider and one hunter")
+        (fun () ->
+          Trainer.play_ppo (Random.State.make [| 0 |]) ~time_limit:1. ~hider:None
+            ~hunter:None w) );
+    ( "check_files: neither ppo with --out" >:: fun _ ->
+      assert_raises
+        (Invalid_argument "--out and --in need --hider=ppo or --hunter=ppo")
+        (check ~h:false ~u:false ~out:(Some "f") ~input:None) );
+    ( "check_files: neither ppo with --in" >:: fun _ ->
+      assert_raises
+        (Invalid_argument "--out and --in need --hider=ppo or --hunter=ppo")
+        (check ~h:false ~u:false ~out:None ~input:(Some "f")) );
+    ( "check_files: neither ppo, no files is fine" >:: fun _ ->
+      check ~h:false ~u:false ~out:None ~input:None () );
+    ( "check_files: one ppo side with files is fine" >:: fun _ ->
+      check ~h:false ~u:true ~out:(Some "f") ~input:(Some "g") () );
+  ]
+
 let suite =
   "hideseek" >::: [ "vec2d" >::: vec2d_tests; "rect" >::: rect_tests; "physics" >::: physics_tests; "game" >::: game_tests;
     "timer" >::: timer_tests; "display" >::: display_tests;
@@ -710,6 +783,7 @@ let suite =
     "spawn" >::: spawn_tests; "trainer" >::: trainer_tests;
     "greedy_strategy" >::: greedy_strategy_tests;
     "user_input_strategy" >::: user_input_strategy_tests;
-    "mlp" >::: mlp_tests; "ppo" >::: ppo_tests ]
+    "mlp" >::: mlp_tests; "ppo" >::: ppo_tests;
+    "trainer_ppo" >::: trainer_ppo_tests ]
 
 let () = run_test_tt_main suite
