@@ -61,7 +61,7 @@ type agent = { policy : Mlp.t; value : Mlp.t; log_std : float array }
 let init rng =
   {
     policy = Mlp.init rng [ 4; 5; 5; 2 ];
-    value = Mlp.init rng [ 4; 5; 5; 1 ];
+    value = Mlp.init rng [ 4; 16; 16; 16; 1 ];
     log_std = [| 0.; 0. |];
   }
 
