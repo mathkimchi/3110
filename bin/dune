@@ -1,4 +1,11 @@
 (executable
  (public_name game)
  (name main)
+ (modules main)
  (libraries hideseek raylib))
+
+(executable
+ (public_name train)
+ (name train)
+ (modules train)
+ (libraries hideseek unix))
