@@ -776,6 +776,54 @@ let trainer_ppo_tests =
       check ~h:false ~u:true ~out:(Some "f") ~input:(Some "g") () );
   ]
 
+(* ---------- Weights ---------- *)
+
+let with_temp f =
+  let file = Filename.temp_file "weights" ".txt" in
+  Fun.protect ~finally:(fun () -> Sys.remove file) (fun () -> f file)
+
+let same_agent a b =
+  let o = [| 0.2; 0.7; 0.5; 0.1 |] in
+  feq (Ppo.value a o) (Ppo.value b o)
+  && feq (Ppo.action_log_prob a o [| 0.3; -0.4 |]) (Ppo.action_log_prob b o [| 0.3; -0.4 |])
+
+let weights_tests =
+  [
+    ( "save then load, both sides" >:: fun _ ->
+      with_temp (fun file ->
+          let h = Ppo.init (Random.State.make [| 1 |])
+          and u = Ppo.init (Random.State.make [| 2 |]) in
+          Weights.save file { seed = 42; hider = Some h; hunter = Some u };
+          let w = Weights.load file in
+          assert_equal ~printer:string_of_int 42 w.seed;
+          assert_bool "hider" (same_agent h (Option.get w.hider));
+          assert_bool "hunter" (same_agent u (Option.get w.hunter))) );
+    ( "save then load, hunter only" >:: fun _ ->
+      with_temp (fun file ->
+          let u = Ppo.init (Random.State.make [| 2 |]) in
+          Weights.save file { seed = 7; hider = None; hunter = Some u };
+          let w = Weights.load file in
+          assert_equal 7 w.seed;
+          assert_bool "no hider" (w.hider = None);
+          assert_bool "hunter" (same_agent u (Option.get w.hunter))) );
+    ( "load rejects junk" >:: fun _ ->
+      with_temp (fun file ->
+          let oc = open_out file in
+          output_string oc "hello\n";
+          close_out oc;
+          match Weights.load file with
+          | _ -> assert_failure "loaded junk"
+          | exception Failure _ -> ()) );
+    ( "load rejects a cut-off file" >:: fun _ ->
+      with_temp (fun file ->
+          let oc = open_out file in
+          output_string oc "seed 3\nhider\nmlp 4 4 5 5 2\n 0x1p+0";
+          close_out oc;
+          match Weights.load file with
+          | _ -> assert_failure "loaded a cut-off file"
+          | exception Failure _ -> ()) );
+  ]
+
 let suite =
   "hideseek" >::: [ "vec2d" >::: vec2d_tests; "rect" >::: rect_tests; "physics" >::: physics_tests; "game" >::: game_tests;
     "timer" >::: timer_tests; "display" >::: display_tests;
@@ -784,6 +832,7 @@ let suite =
     "greedy_strategy" >::: greedy_strategy_tests;
     "user_input_strategy" >::: user_input_strategy_tests;
     "mlp" >::: mlp_tests; "ppo" >::: ppo_tests;
-    "trainer_ppo" >::: trainer_ppo_tests ]
+    "trainer_ppo" >::: trainer_ppo_tests;
+    "weights" >::: weights_tests ]
 
 let () = run_test_tt_main suite
