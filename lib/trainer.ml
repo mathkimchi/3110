@@ -36,11 +36,13 @@ let step_reward w (role : Entity.role) =
   let r = d /. Ppo.arena *. dt in
   match role with Hider -> r | Hunter -> -.r
 
+let terminal_value = 100.
+
 let end_reward o (role : Entity.role) =
   match (o, role) with
   | Game.Ongoing, _ -> 0.
-  | Game.Hiders_win, Hider | Game.Hunters_win, Hunter -> 1.
-  | Game.Hiders_win, Hunter | Game.Hunters_win, Hider -> -1.
+  | Game.Hiders_win, Hider | Game.Hunters_win, Hunter -> terminal_value
+  | Game.Hiders_win, Hunter | Game.Hunters_win, Hider -> -. terminal_value
 
 type experience = { hider : Ppo.sample array; hunter : Ppo.sample array }
 
