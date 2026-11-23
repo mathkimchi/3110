@@ -395,6 +395,46 @@ let spawn_tests =
       | exception Failure _ -> () );
   ]
 
+(* ---------- Trainer ---------- *)
+
+let tally_of = List.fold_left Trainer.record Trainer.empty
+let assert_rate expected got =
+  assert_equal ~cmp:feq ~printer:string_of_float expected got
+
+let trainer_tests =
+  let greedy = (module Greedy_strategy : Strategy.S)
+  and stay = (module Strategy.Stay : Strategy.S) in
+  let hunter = mk ~id:1 ~role:Entity.Hunter ~speed:100. 200. 0. in
+  [
+    ( "dt is 20 steps per second" >:: fun _ -> assert_rate 0.05 Trainer.dt );
+    ( "hunter catches a hider that stays" >:: fun _ ->
+      let w = World.init ~walls:[] ~entities:[ mk 0. 0.; hunter ] in
+      let o, secs = Trainer.play (Game.init ~time_limit:20. w [ stay; greedy ]) in
+      assert_outcome Game.Hunters_win o;
+      (* 200 px at 100 px/s, minus the 10 px the boxes need to touch *)
+      assert_bool "about 1.9 s" (secs > 1.8 && secs < 2.0) );
+    ( "hider walled off survives the whole time" >:: fun _ ->
+      let wall = Rect.{ pos = Vec2d.{ x = 100.; y = -1000. }; w = 10.; h = 2000. } in
+      let w = World.init ~walls:[ wall ] ~entities:[ mk 0. 0.; hunter ] in
+      let o, secs = Trainer.play (Game.init ~time_limit:3. w [ stay; greedy ]) in
+      assert_outcome Game.Hiders_win o;
+      assert_rate 3. secs );
+    ( "empty tally has no rounds" >:: fun _ ->
+      assert_equal 0 (Trainer.rounds Trainer.empty);
+      assert_rate 0. (Trainer.hider_rate Trainer.empty);
+      assert_rate 0. (Trainer.hunter_rate Trainer.empty) );
+    ( "tally counts each side" >:: fun _ ->
+      let t = tally_of Game.[ Hiders_win; Hunters_win; Hiders_win; Hiders_win ] in
+      assert_equal ~printer:string_of_int 4 (Trainer.rounds t);
+      assert_equal ~printer:string_of_int 3 (Trainer.hider_wins t);
+      assert_equal ~printer:string_of_int 1 (Trainer.hunter_wins t);
+      assert_rate 0.75 (Trainer.hider_rate t);
+      assert_rate 0.25 (Trainer.hunter_rate t) );
+    ( "record rejects Ongoing" >:: fun _ ->
+      assert_raises (Invalid_argument "Trainer.record: game is still ongoing")
+        (fun () -> Trainer.record Trainer.empty Game.Ongoing) );
+  ]
+
 (* ---------- Greedy_strategy ---------- *)
 
 (* directions may have any length, so compare them normalized *)
@@ -472,7 +512,7 @@ let suite =
   "hideseek" >::: [ "vec2d" >::: vec2d_tests; "rect" >::: rect_tests; "physics" >::: physics_tests; "game" >::: game_tests;
     "timer" >::: timer_tests; "display" >::: display_tests;
     "world" >::: world_tests; "strategy" >::: strategy_tests;
-    "spawn" >::: spawn_tests;
+    "spawn" >::: spawn_tests; "trainer" >::: trainer_tests;
     "greedy_strategy" >::: greedy_strategy_tests;
     "user_input_strategy" >::: user_input_strategy_tests ]
 
