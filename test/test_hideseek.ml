@@ -576,6 +576,133 @@ let mlp_tests =
         (Mlp.forward n' [| 0.3; -0.1; 0.9; 0.5 |]) );
   ]
 
+(* ---------- Ppo ---------- *)
+
+let half_log_2pi = 0.5 *. log (2. *. Float.pi)
+
+let ppo_world =
+  World.init ~walls:[]
+    ~entities:
+      [
+        mk ~id:0 ~role:Entity.Hider 30. 70.;
+        mk ~id:1 ~role:Entity.Hunter 190. 390.;
+      ]
+
+let float_arrays_eq a b =
+  Array.length a = Array.length b && Array.for_all2 feq a b
+
+let assert_floats expected actual =
+  assert_equal ~cmp:float_arrays_eq ~printer:float_array_printer expected actual
+
+(* the action [ag] samples (seed 0) at a fixed obs, with the given [adv] and
+   [ret] *)
+let one_sample ag ~adv ~ret =
+  let obs = [| 0.1; 0.2; 0.8; 0.9 |] in
+  let act, logp = Ppo.act (Random.State.make [| 0 |]) ag obs in
+  { Ppo.obs; act; logp; adv; ret }
+
+(* [n] updates of [l] on copies of [s] *)
+let rec train_on n l s =
+  if n = 0 then l
+  else train_on (n - 1) (Ppo.update (Random.State.make [| n |]) l (Array.make 8 s)) s
+
+let ppo_tests =
+  [
+    ( "log_prob at the mean, std 1" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float (-2. *. half_log_2pi)
+        (Ppo.log_prob ~mean:[| 1.; 2. |] ~log_std:[| 0.; 0. |] [| 1.; 2. |]) );
+    ( "log_prob one std away, std e" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float
+        (-0.5 -. 1. -. half_log_2pi)
+        (Ppo.log_prob ~mean:[| 0. |] ~log_std:[| 1. |] [| exp 1. |]) );
+    ( "gae with lambda 1 is the discounted return" >:: fun _ ->
+      let adv, ret =
+        Ppo.gae ~gamma:0.5 ~lambda:1. ~rewards:[| 1.; 2.; 4. |]
+          ~values:[| 1.; 1.; 1. |]
+      in
+      (* returns: 4, then 2 + 0.5*4 = 4, then 1 + 0.5*4 = 3 *)
+      assert_floats [| 3.; 4.; 4. |] ret;
+      assert_floats [| 2.; 3.; 3. |] adv );
+    ( "gae with lambda 0 is one-step TD" >:: fun _ ->
+      let adv, ret =
+        Ppo.gae ~gamma:0.5 ~lambda:0. ~rewards:[| 1.; 2. |] ~values:[| 2.; 4. |]
+      in
+      (* delta_0 = 1 + 0.5*4 - 2, delta_1 = 2 + 0 - 4 *)
+      assert_floats [| 1.; -2. |] adv;
+      assert_floats [| 3.; 2. |] ret );
+    ( "gae length mismatch" >:: fun _ ->
+      assert_raises (Invalid_argument "Ppo.gae: length mismatch") (fun () ->
+          Ppo.gae ~gamma:0.9 ~lambda:0.9 ~rewards:[| 1. |] ~values:[||]) );
+    ( "observe: own center then opponent center, scaled" >:: fun _ ->
+      let hider = List.hd (World.entities ppo_world) in
+      assert_floats [| 35. /. 400.; 75. /. 400.; 195. /. 400.; 395. /. 400. |]
+        (Ppo.observe ppo_world hider) );
+    ( "observe: no living opponent uses own center" >:: fun _ ->
+      let hider = List.hd (World.entities ppo_world) in
+      let w =
+        World.with_entities ppo_world
+          (List.map
+             (fun (e : Entity.t) -> if e.role = Hunter then { e with alive = false } else e)
+             (World.entities ppo_world))
+      in
+      assert_floats [| 35. /. 400.; 75. /. 400.; 35. /. 400.; 75. /. 400. |]
+        (Ppo.observe w hider) );
+    ( "act is reproducible from the seed" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 4 |]) in
+      let o = [| 0.1; 0.2; 0.3; 0.4 |] in
+      let a1, l1 = Ppo.act (Random.State.make [| 9 |]) ag o in
+      let a2, l2 = Ppo.act (Random.State.make [| 9 |]) ag o in
+      assert_floats a1 a2;
+      assert_equal ~cmp:feq l1 l2 );
+    ( "update moves value toward the return" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 5 |]) in
+      let s = one_sample ag ~adv:1. ~ret:3. in
+      let before = Float.abs (Ppo.value ag s.obs -. 3.) in
+      let ag' = Ppo.agent (train_on 30 (Ppo.learner ag) s) in
+      let after = Float.abs (Ppo.value ag' s.obs -. 3.) in
+      assert_bool (Printf.sprintf "%f -> %f" before after) (after < before) );
+    ( "update makes a good action more likely" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 5 |]) in
+      let s = one_sample ag ~adv:1. ~ret:0. in
+      (* a lone sample normalizes to advantage 0, so mix in a bad action *)
+      let bad = { s with act = Array.map (fun x -> -.x) s.act; adv = -1. } in
+      let bad = { bad with logp = Ppo.action_log_prob ag bad.obs bad.act } in
+      let l =
+        List.fold_left
+          (fun l i -> Ppo.update (Random.State.make [| i |]) l [| s; bad; s; bad |])
+          (Ppo.learner ag) (List.init 30 Fun.id)
+      in
+      let before = Ppo.action_log_prob ag s.obs s.act in
+      let after = Ppo.action_log_prob (Ppo.agent l) s.obs s.act in
+      assert_bool (Printf.sprintf "%f -> %f" before after) (after > before) );
+    ( "action_log_prob matches act" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 8 |]) in
+      let o = [| 0.4; 0.4; 0.6; 0.1 |] in
+      let a, l = Ppo.act (Random.State.make [| 3 |]) ag o in
+      assert_equal ~cmp:feq ~printer:string_of_float l (Ppo.action_log_prob ag o a) );
+    ( "update with an empty batch changes nothing" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 5 |]) in
+      let ag' = Ppo.agent (Ppo.update (Random.State.make [| 1 |]) (Ppo.learner ag) [||]) in
+      let o = [| 0.5; 0.5; 0.1; 0.1 |] in
+      assert_equal ~cmp:feq (Ppo.value ag o) (Ppo.value ag' o) );
+    ( "write then read is exact" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 6 |]) in
+      let file = Filename.temp_file "ppo" ".txt" in
+      let oc = open_out file in
+      Ppo.write oc ag;
+      close_out oc;
+      let ic = Scanf.Scanning.open_in file in
+      let ag' = Ppo.read ic in
+      Scanf.Scanning.close_in ic;
+      Sys.remove file;
+      let o = [| 0.3; 0.6; 0.2; 0.9 |] in
+      assert_equal ~cmp:feq (Ppo.value ag o) (Ppo.value ag' o);
+      let a, l = Ppo.act (Random.State.make [| 2 |]) ag o in
+      let a', l' = Ppo.act (Random.State.make [| 2 |]) ag' o in
+      assert_floats a a';
+      assert_equal ~cmp:feq l l' );
+  ]
+
 let suite =
   "hideseek" >::: [ "vec2d" >::: vec2d_tests; "rect" >::: rect_tests; "physics" >::: physics_tests; "game" >::: game_tests;
     "timer" >::: timer_tests; "display" >::: display_tests;
@@ -583,6 +710,6 @@ let suite =
     "spawn" >::: spawn_tests; "trainer" >::: trainer_tests;
     "greedy_strategy" >::: greedy_strategy_tests;
     "user_input_strategy" >::: user_input_strategy_tests;
-    "mlp" >::: mlp_tests ]
+    "mlp" >::: mlp_tests; "ppo" >::: ppo_tests ]
 
 let () = run_test_tt_main suite
