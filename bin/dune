@@ -8,4 +8,4 @@
  (public_name train)
  (name train)
  (modules train)
- (libraries hideseek unix))
+ (libraries hideseek raylib unix))

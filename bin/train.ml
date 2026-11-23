@@ -1,6 +1,7 @@
-(* Training runner: plays rounds on the default map without a window, each
-   from random start positions, trains the PPO sides every --batch rounds and
-   prints the running win rate. *)
+(* Training runner: plays rounds on the default map in a window at --speed
+   times real time, each from random start positions, trains the PPO sides
+   every --batch rounds and prints the running win rate. Closing the window
+   quits right away without saving. *)
 open Hideseek
 
 let rounds = ref 100
@@ -9,6 +10,7 @@ let seed = ref None
 let batch = ref 10
 let hider_ppo = ref true
 let hunter_ppo = ref true
+let speed = ref 1.
 let out = ref None
 let input = ref None
 
@@ -39,6 +41,16 @@ let speclist =
     ( "--hunter",
       side (fun b -> hunter_ppo := b),
       " who plays the hunter, e.g. --hunter=ppo (the default) or --hunter=greedy" );
+    ( "--speed",
+      Arg.Float
+        (fun x ->
+          (* 0 and inf both mean no waiting *)
+          if Float.is_nan x || x < 0. then
+            raise (Arg.Bad "--speed must be 0 (as fast as possible) or more");
+          speed := if x = 0. then infinity else x),
+      " game seconds per real second in the window, e.g. --speed=1 (the \
+       default), --speed=5, or --speed=0 / --speed=inf for as fast as \
+       possible" );
     ( "--batch",
       Arg.Int (positive "--batch" (fun n -> batch := n)),
       " rounds between PPO updates, e.g. --batch=10 (the default)" );
@@ -54,7 +66,7 @@ let speclist =
 
 let usage =
   "train [--rounds=N] [--time=SECONDS] [--seed=N] [--hider=ppo|greedy] \
-   [--hunter=ppo|greedy] [--batch=N] [--out=FILE] [--in=FILE]"
+   [--hunter=ppo|greedy] [--speed=X] [--batch=N] [--out=FILE] [--in=FILE]"
 
 let outcome_name = function
   | Game.Hiders_win -> "hiders win "
@@ -66,6 +78,30 @@ let pct r = 100. *. r
 (* how many game seconds passed per wall-clock second; infinite if the clock
    did not move *)
 let speedup ~game ~wall = if wall > 0. then game /. wall else infinity
+
+(* the longest the window goes without a new frame: 60 frames a second *)
+let frame = 1. /. 60.
+
+(* [show sprites t0 time_limit] is the [on_step] for a round that started at
+   wall-clock time [t0]: it waits until the game is no more than --speed
+   times ahead of the wall clock, then draws a frame if one is due. Quits
+   the program if the window was closed. *)
+let show sprites t0 time_limit =
+  let last_draw = ref neg_infinity in
+  fun g o ->
+    if Raylib.window_should_close () then begin
+      Display.unload_sprites sprites;
+      Raylib.close_window ();
+      exit 0
+    end;
+    let played = time_limit -. Game.time_left g in
+    let ahead = t0 +. (played /. !speed) -. Unix.gettimeofday () in
+    if ahead > 0. then Unix.sleepf ahead;
+    let now = Unix.gettimeofday () in
+    if now -. !last_draw >= frame || o <> Game.Ongoing then begin
+      Display.draw sprites g o;
+      last_draw := now
+    end
 
 let fail msg =
   prerr_endline ("train: " ^ msg);
@@ -109,14 +145,20 @@ let () =
   let file_opt name = function None -> "" | Some f -> Printf.sprintf " --%s=%s" name f in
   (* the options as given on the command line, so the run can be repeated *)
   Printf.printf
-    "train --rounds=%d --time=%g --seed=%d --hider=%s --hunter=%s --batch=%d%s%s  \
-     (dt %g s)\n\
+    "train --rounds=%d --time=%g --seed=%d --hider=%s --hunter=%s --speed=%g \
+     --batch=%d%s%s  (dt %g s)\n\
      %!"
-    !rounds !time_limit seed (side_name !hider_ppo) (side_name !hunter_ppo) !batch
+    !rounds !time_limit seed (side_name !hider_ppo) (side_name !hunter_ppo) !speed !batch
     (file_opt "out" !out) (file_opt "in" !input) Trainer.dt;
   Option.iter
     (fun (w : Weights.t) -> Printf.printf "loaded %s (saved by a run with --seed=%d)\n" (Option.get !input) w.seed)
     loaded;
+  (* same window setup as bin/main.ml, without a target FPS so drawing never
+     waits; [show] does the pacing *)
+  Raylib.set_config_flags Raylib.ConfigFlags.window_resizable;
+  Raylib.init_window 400 400 "hideseek training";
+  Raylib.set_exit_key Raylib.Key.Q;
+  let sprites = Display.load_sprites () in
   let rng = Random.State.make [| seed |] in
   let from_file f = Option.bind loaded f in
   let hider =
@@ -133,7 +175,9 @@ let () =
       let w = Spawn.randomize rng World.default in
       let t0 = Unix.gettimeofday () in
       let o, secs, (ex : Trainer.experience) =
-        Trainer.play_ppo rng ~time_limit:!time_limit
+        Trainer.play_ppo
+          ~on_step:(show sprites t0 !time_limit)
+          rng ~time_limit:!time_limit
           ~hider:(Option.map Ppo.agent hider) ~hunter:(Option.map Ppo.agent hunter) w
       in
       let wall = Unix.gettimeofday () -. t0 in
@@ -168,6 +212,8 @@ let () =
     (Trainer.hunter_wins tally)
     (pct (Trainer.hunter_rate tally))
     (speedup ~game:game_total ~wall:wall_total);
+  Display.unload_sprites sprites;
+  Raylib.close_window ();
   match !out with
   | Some f ->
       Weights.save f
