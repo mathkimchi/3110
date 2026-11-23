@@ -1,20 +1,17 @@
 open Hideseek
 
-let draw g outcome =
-  Raylib.begin_drawing ();
-  Raylib.clear_background Raylib.Color.raywhite;
-  Raylib.draw_text (Display.render g outcome) 10 10 20 Raylib.Color.black;
-  Raylib.end_drawing ()
+
+
 
 (* one iteration per frame; once the game is over the world stops changing *)
-let rec loop g outcome =
+let rec loop sprites g  outcome =
   if not (Raylib.window_should_close ()) then begin
     let g, outcome =
       if outcome = Game.Ongoing then Game.step g (Raylib.get_frame_time ())
       else (g, outcome)
     in
-    draw g outcome;
-    loop g outcome
+    Display.draw sprites g outcome;
+    loop sprites g outcome
   end
 
 (* seconds the hiders must survive; settable with --time *)
@@ -44,11 +41,13 @@ let () =
   Raylib.set_target_fps 60;
   (* Raylib quits on Esc by default; Q matches the old terminal prototype *)
   Raylib.set_exit_key Raylib.Key.Q;
+    let sprites = Display.load_sprites () in (*load png images*)
   (* World.default is [ hider 0; hunter 1 ]: the keyboard drives the hider
      and the hunter chases it greedily *)
   let g =
     Game.init ~time_limit:!time_limit World.default
       [ (module User_input_strategy); (module Greedy_strategy) ]
   in
-  loop g Game.Ongoing;
+  loop sprites g Game.Ongoing;
+    Display.unload_sprites sprites; (*asset images*)
   Raylib.close_window ()
