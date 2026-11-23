@@ -680,6 +680,26 @@ let ppo_tests =
       let o = [| 0.4; 0.4; 0.6; 0.1 |] in
       let a, l = Ppo.act (Random.State.make [| 3 |]) ag o in
       assert_equal ~cmp:feq ~printer:string_of_float l (Ppo.action_log_prob ag o a) );
+    ( "losses: value is the mean squared error" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 5 |]) in
+      let s = one_sample ag ~adv:1. ~ret:3. in
+      let s2 = { (one_sample ag ~adv:(-1.) ~ret:(-2.)) with obs = [| 0.7; 0.1; 0.3; 0.5 |] } in
+      let s2 = { s2 with logp = Ppo.action_log_prob ag s2.obs s2.act } in
+      let sq (x : Ppo.sample) = (Ppo.value ag x.obs -. x.ret) ** 2. in
+      let _, v = Ppo.losses (Ppo.learner ag) [| s; s2 |] in
+      assert_equal ~cmp:feq ~printer:string_of_float ((sq s +. sq s2) /. 2.) v );
+    ( "losses: policy is 0 before any update" >:: fun _ ->
+      (* ratio 1 everywhere, so the loss is minus the mean normalized
+         advantage, which is 0 *)
+      let ag = Ppo.init (Random.State.make [| 5 |]) in
+      let s = one_sample ag ~adv:1. ~ret:0. in
+      let bad = { s with act = Array.map (fun x -> -.x) s.act; adv = -1. } in
+      let bad = { bad with logp = Ppo.action_log_prob ag bad.obs bad.act } in
+      let p, _ = Ppo.losses (Ppo.learner ag) [| s; bad |] in
+      assert_equal ~cmp:feq ~printer:string_of_float 0. p );
+    ( "losses of an empty batch are nan" >:: fun _ ->
+      let p, v = Ppo.losses (Ppo.learner (Ppo.init (Random.State.make [| 5 |]))) [||] in
+      assert_bool "nan" (Float.is_nan p && Float.is_nan v) );
     ( "update with an empty batch changes nothing" >:: fun _ ->
       let ag = Ppo.init (Random.State.make [| 5 |]) in
       let ag' = Ppo.agent (Ppo.update (Random.State.make [| 1 |]) (Ppo.learner ag) [||]) in

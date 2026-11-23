@@ -190,14 +190,28 @@ let () =
         (speedup ~game:secs ~wall);
       let hider_xp = ex.hider :: hider_xp and hunter_xp = ex.hunter :: hunter_xp in
       if i mod !batch = 0 || i = !rounds then begin
+        (* the updated learner and its losses on the batch it learned from *)
         let update l xp =
-          Option.map (fun l -> Ppo.update rng l (Array.concat (List.rev xp))) l
+          Option.map
+            (fun l ->
+              let samples = Array.concat (List.rev xp) in
+              let l = Ppo.update rng l samples in
+              (l, Ppo.losses l samples))
+            l
         in
         let t0 = Unix.gettimeofday () in
-        let hider = update hider hider_xp and hunter = update hunter hunter_xp in
-        if hider <> None || hunter <> None then
+        let hider_u = update hider hider_xp and hunter_u = update hunter hunter_xp in
+        let hider = Option.map fst hider_u and hunter = Option.map fst hunter_u in
+        if hider <> None || hunter <> None then begin
           Printf.printf "  updated after round %d in %.2f s\n%!" i
             (Unix.gettimeofday () -. t0);
+          let report name =
+            Option.iter (fun (_, (p, v)) ->
+                Printf.printf "    %-6s policy loss %9.4f | value loss %12.4f\n%!" name p v)
+          in
+          report "hider" hider_u;
+          report "hunter" hunter_u
+        end;
         loop (i + 1) hider hunter [] [] tally (game_total +. secs) (wall_total +. wall)
       end
       else loop (i + 1) hider hunter hider_xp hunter_xp tally (game_total +. secs) (wall_total +. wall)

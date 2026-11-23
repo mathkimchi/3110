@@ -273,6 +273,13 @@ let update rng l samples =
     in
     epoch epochs l
 
+let losses l samples =
+  if Array.length samples = 0 then (nan, nan)
+  else
+    let s = normalize_adv samples in
+    let eval loss ps = AD.unpack_flt (loss s (List.map AD.pack_arr ps)) in
+    (eval policy_loss (policy_params l.ag), eval value_loss (Mlp.params l.ag.value))
+
 (* ---------- saving ---------- *)
 
 let write oc ag =

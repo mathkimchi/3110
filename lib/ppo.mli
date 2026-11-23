@@ -90,6 +90,14 @@ val update : Random.State.t -> learner -> sample array -> learner
     clipped policy loss (policy and [log_std]) and one on the squared error
     of the value network. [l] unchanged if [samples] is empty. *)
 
+val losses : learner -> sample array -> float * float
+(** [losses l samples] is [(policy, value)]: the clipped policy loss and the
+    value network's mean squared error that [update] minimizes, for [l]'s
+    current networks on all of [samples] (advantages normalized as in
+    [update]). A value loss that stays high while the policy loss settles
+    hints that the value network is too small for the returns.
+    [(nan, nan)] if [samples] is empty. *)
+
 val write : out_channel -> agent -> unit
 (** [write oc ag] writes [ag]'s networks and [log_std] to [oc] as text. *)
 
