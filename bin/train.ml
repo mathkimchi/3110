@@ -14,16 +14,16 @@ let speclist =
   [
     ( "--rounds",
       Arg.Int (positive "--rounds" (fun n -> rounds := n)),
-      "N  how many rounds to play (default 100)" );
+      " how many rounds to play, e.g. --rounds=100 (the default)" );
     ( "--time",
       Arg.Float
         (fun t ->
           if t <= 0. then raise (Arg.Bad "--time must be greater than 0");
           time_limit := t),
-      "SECONDS  how long the hiders must survive to win (default 20)" );
+      " seconds the hiders must survive, e.g. --time=20 (the default)" );
     ( "--seed",
       Arg.Int (fun s -> seed := Some s),
-      "N  seed for the start positions (default: random)" );
+      " seed for the start positions, e.g. --seed=1 (default: random)" );
   ]
 
 let usage = "train [--rounds=N] [--time=SECONDS] [--seed=N]"
@@ -44,7 +44,7 @@ let pct r = 100. *. r
 let speedup ~game ~wall = if wall > 0. then game /. wall else infinity
 
 let () =
-  Arg.parse speclist
+  Arg.parse (Arg.align speclist)
     (fun a -> raise (Arg.Bad ("unexpected argument " ^ a)))
     usage;
   let seed =
@@ -52,8 +52,9 @@ let () =
     | Some s -> s
     | None -> Random.State.bits (Random.State.make_self_init ())
   in
-  Printf.printf "seed %d, %d rounds, %g s each, dt %g s\n%!" seed !rounds
-    !time_limit Trainer.dt;
+  (* the options as given on the command line, so the run can be repeated *)
+  Printf.printf "train --rounds=%d --time=%g --seed=%d  (dt %g s)\n%!" !rounds
+    !time_limit seed Trainer.dt;
   let rng = Random.State.make [| seed |] in
   let rec loop i tally game_total wall_total =
     if i > !rounds then (tally, game_total, wall_total)
