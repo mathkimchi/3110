@@ -75,8 +75,9 @@ let draw sprites g outcome =
   Raylib.clear_background Raylib.Color.raywhite;
   List.iter (draw_rect wall_color) (World.walls (Game.world g));
     List.iter (draw_entity sprites) (World.entities (Game.world g));
-  Raylib.draw_text (render g outcome) 10 10 20 Raylib.Color.black;
+  let time_text = Printf.sprintf "Time: %.1f" (Game.time_left g) in
+  let status_text = "Status: " ^ string_of_outcome outcome in
+  Raylib.draw_text time_text 10 10 20 Raylib.Color.black;
+  Raylib.draw_text status_text 10 35 20 Raylib.Color.black;
   Raylib.end_drawing ()    
-
-
 
