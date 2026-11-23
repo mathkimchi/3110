@@ -1,3 +1,5 @@
+(* Game seconds per step, so 20 decisions per second. Also the unit [gamma]
+   discounts by: changing dt changes how many seconds gamma looks ahead. *)
 let dt = 1. /. 20.
 
 let play g =
@@ -29,6 +31,13 @@ let hunter_rate t = rate t.hunter_wins t
 
 let center e = Rect.center (Entity.hitbox e)
 
+(* Reward shaping each step: the hider gets distance / arena * dt, the
+   hunter the negative. Per game second that is distance / arena, e.g. 0.5
+   at 200 px apart (up to about 1.4 on the diagonal), so a 20 s round sums
+   to about 10, much more than [end_reward]'s 1. Even discounted (about 100
+   steps of horizon, about 2.5) it outweighs winning, so the agents mostly
+   learn "keep distance" / "close distance". Scale it down to make the
+   outcome matter more. *)
 let step_reward w (role : Entity.role) =
   let d =
     Vec2d.dist (center (List.hd (World.hiders w))) (center (List.hd (World.hunters w)))
@@ -38,6 +47,9 @@ let step_reward w (role : Entity.role) =
 
 let terminal_value = 100.
 
+(* +1 for the winner and -1 for the loser on the last step. The same no
+   matter when the catch happens; only discounting makes an early catch
+   cost more. *)
 let end_reward o (role : Entity.role) =
   match (o, role) with
   | Game.Ongoing, _ -> 0.

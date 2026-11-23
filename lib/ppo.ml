@@ -1,17 +1,52 @@
 module N = Mlp.N
 module AD = Mlp.AD
 
+(* ---------- hyperparameters ---------- *)
+
+(* Width of [World.default] in pixels. Positions are divided by this so the
+   networks get inputs around 0..1. *)
 let arena = 400.
+
+(* Discount per step. A reward k steps ahead counts gamma^k as much as one
+   now. Steps are [Trainer.dt] = 1/20 s apart, so the effective horizon is
+   about 1 / (1 - gamma) = 100 steps = 5 game seconds. Raise toward 1 (e.g.
+   0.995 is about 10 s, 0.999 about 50 s) to make later events like the
+   timeout win matter more. *)
 let gamma = 0.99
+
+(* GAE lambda: how far advantages look ahead before trusting the value
+   network. 0 = one-step TD (low variance, biased by a bad critic); 1 = full
+   Monte Carlo return (unbiased, noisy). 0.95 is the usual middle. *)
 let lambda = 0.95
+
+(* PPO clip range. In one update the new/old action probability ratio only
+   counts inside [1 - clip, 1 + clip], so the policy cannot move too far
+   from the one that collected the data. Smaller = more cautious updates. *)
 let clip = 0.2
+
+(* Adam learning rate for both the policy and value networks. Too high and
+   training swings or diverges; too low and it barely moves. *)
 let lr = 3e-4
+
+(* Passes over the same batch of samples per update. More reuses data
+   harder but drifts further from the data-collecting policy (clip only
+   partly guards against that). *)
 let epochs = 4
+
+(* Samples per gradient step. One round of 20 s is about 400 samples per
+   side, so --batch=10 rounds gives roughly 16 steps per epoch. Smaller =
+   more, noisier steps. *)
 let minibatch = 256
+
 let log_2pi = log (2. *. Float.pi)
 
 type agent = { policy : Mlp.t; value : Mlp.t; log_std : float array }
 
+(* Layer widths: 4 inputs (see [observe]), two hidden layers of 5, then 2
+   outputs (the mean move x, y) for the policy or 1 (the expected return)
+   for the value network. Wider/deeper can learn more but trains slower.
+   [log_std] is the log of the exploration noise on each action; 0 means
+   standard deviation 1, and it is learned along with the policy. *)
 let init rng =
   {
     policy = Mlp.init rng [ 4; 5; 5; 2 ];
@@ -99,6 +134,10 @@ let adam_init params =
   let z = List.map (fun p -> N.zeros (N.shape p)) params in
   { m = z; v = z; steps = 0 }
 
+(* Adam's standard settings. beta1: decay of the running mean of gradients
+   (momentum). beta2: decay of the running mean of squared gradients (the
+   per-parameter step scale). eps: keeps the division away from 0. Rarely
+   worth changing. *)
 let beta1 = 0.9
 let beta2 = 0.999
 let eps = 1e-8
