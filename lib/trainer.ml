@@ -86,7 +86,7 @@ let samples log =
   let adv, ret =
     Ppo.gae ~gamma:(Ppo.gamma ~dt) ~lambda:(Ppo.lambda ~dt)
       ~rewards:(Array.map (fun s -> s.reward) steps)
-      ~values:(Array.map (fun s -> s.value) steps)
+      ~values:(Array.map (fun s -> s.value) steps) ()
   in
   Array.mapi
     (fun i (s : step) ->

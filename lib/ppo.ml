@@ -115,11 +115,11 @@ let value ag o = (Mlp.forward ag.value o).(0)
 
 (* ---------- advantages ---------- *)
 
-let gae ~gamma ~lambda ~rewards ~values =
+let gae ?(bootstrap = 0.) ~gamma ~lambda ~rewards ~values () =
   let n = Array.length rewards in
   if Array.length values <> n then invalid_arg "Ppo.gae: length mismatch";
   let adv = Array.make n 0. in
-  let next_adv = ref 0. and next_v = ref 0. in
+  let next_adv = ref 0. and next_v = ref bootstrap in
   for t = n - 1 downto 0 do
     let delta = rewards.(t) +. (gamma *. !next_v) -. values.(t) in
     adv.(t) <- delta +. (gamma *. lambda *. !next_adv);

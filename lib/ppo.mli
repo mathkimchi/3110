@@ -62,13 +62,18 @@ val value : agent -> float array -> float
 (** [value ag o] is [ag]'s value network on observation [o]. *)
 
 val gae :
+  ?bootstrap:float ->
   gamma:float ->
   lambda:float ->
   rewards:float array ->
   values:float array ->
+  unit ->
   float array * float array
-(** [gae ~gamma ~lambda ~rewards ~values] is [(advantages, returns)] for one
-    episode that ends after its last step (the value after it is [0.]):
+(** [gae ~bootstrap ~gamma ~lambda ~rewards ~values ()] is
+    [(advantages, returns)] for one episode whose value after its last step
+    is [bootstrap]: [0.] (the default) if the episode really ended there, or
+    the value network's guess for the state it stopped in if it was cut off
+    by a time limit:
     [delta_t = r_t + gamma * v_(t+1) - v_t],
     [adv_t = delta_t + gamma * lambda * adv_(t+1)] and
     [ret_t = adv_t + v_t].

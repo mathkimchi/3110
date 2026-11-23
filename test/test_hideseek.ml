@@ -618,14 +618,14 @@ let ppo_tests =
     ( "gae with lambda 1 is the discounted return" >:: fun _ ->
       let adv, ret =
         Ppo.gae ~gamma:0.5 ~lambda:1. ~rewards:[| 1.; 2.; 4. |]
-          ~values:[| 1.; 1.; 1. |]
+          ~values:[| 1.; 1.; 1. |] ()
       in
       (* returns: 4, then 2 + 0.5*4 = 4, then 1 + 0.5*4 = 3 *)
       assert_floats [| 3.; 4.; 4. |] ret;
       assert_floats [| 2.; 3.; 3. |] adv );
     ( "gae with lambda 0 is one-step TD" >:: fun _ ->
       let adv, ret =
-        Ppo.gae ~gamma:0.5 ~lambda:0. ~rewards:[| 1.; 2. |] ~values:[| 2.; 4. |]
+        Ppo.gae ~gamma:0.5 ~lambda:0. ~rewards:[| 1.; 2. |] ~values:[| 2.; 4. |] ()
       in
       (* delta_0 = 1 + 0.5*4 - 2, delta_1 = 2 + 0 - 4 *)
       assert_floats [| 1.; -2. |] adv;
@@ -644,9 +644,17 @@ let ppo_tests =
       assert_equal ~cmp:feq ~printer:string_of_float
         (Ppo.lambda ~dt:0.05 ** 20.)
         (Ppo.lambda ~dt:0.001 ** 1000.) );
+    ( "gae bootstraps from the value after a cut-off episode" >:: fun _ ->
+      let adv, ret =
+        Ppo.gae ~bootstrap:4. ~gamma:0.5 ~lambda:1. ~rewards:[| 1.; 2. |]
+          ~values:[| 1.; 1. |] ()
+      in
+      (* returns: 2 + 0.5*4 = 4, then 1 + 0.5*4 = 3 *)
+      assert_floats [| 3.; 4. |] ret;
+      assert_floats [| 2.; 3. |] adv );
     ( "gae length mismatch" >:: fun _ ->
       assert_raises (Invalid_argument "Ppo.gae: length mismatch") (fun () ->
-          Ppo.gae ~gamma:0.9 ~lambda:0.9 ~rewards:[| 1. |] ~values:[||]) );
+          Ppo.gae ~gamma:0.9 ~lambda:0.9 ~rewards:[| 1. |] ~values:[||] ()) );
     ( "observe: own center then opponent center, scaled" >:: fun _ ->
       let hider = List.hd (World.entities ppo_world) in
       assert_floats [| 35. /. 400.; 75. /. 400.; 195. /. 400.; 395. /. 400. |]
