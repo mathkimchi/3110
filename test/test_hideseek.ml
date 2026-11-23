@@ -759,21 +759,34 @@ let check ~h ~u ~out ~input () =
 
 let trainer_ppo_tests =
   [
-    ( "step_reward is +-dist/arena*dt" >:: fun _ ->
-      (* centers (35, 75) and (195, 395): dist = sqrt (160^2 + 320^2) *)
-      let r = sqrt ((160. ** 2.) +. (320. ** 2.)) /. 400. *. Trainer.dt in
+    ( "survival_reward is +-(1 - gamma)" >:: fun _ ->
+      let r = 1. -. Ppo.gamma ~dt:Trainer.dt in
       assert_equal ~cmp:feq ~printer:string_of_float r
-        (Trainer.step_reward ppo_world Entity.Hider);
+        (Trainer.survival_reward Entity.Hider);
       assert_equal ~cmp:feq ~printer:string_of_float (-.r)
-        (Trainer.step_reward ppo_world Entity.Hunter) );
-    ( "end_reward" >:: fun _ ->
-      let v = Trainer.terminal_value in
-      assert_bool "positive" (v > 0.);
-      assert_equal v (Trainer.end_reward Game.Hiders_win Entity.Hider);
-      assert_equal (-.v) (Trainer.end_reward Game.Hiders_win Entity.Hunter);
-      assert_equal v (Trainer.end_reward Game.Hunters_win Entity.Hunter);
-      assert_equal (-.v) (Trainer.end_reward Game.Hunters_win Entity.Hider);
-      assert_equal 0. (Trainer.end_reward Game.Ongoing Entity.Hider) );
+        (Trainer.survival_reward Entity.Hunter) );
+    ( "play_ppo caught hider: return is 1 - gamma^steps survived" >:: fun _ ->
+      let o, _, ex = ppo_round ~time_limit:60. ~hider:true ~hunter:false () in
+      assert_equal ~printer:(fun o -> if o = Game.Hunters_win then "caught" else "not caught")
+        Game.Hunters_win o;
+      let n = Array.length ex.hider in
+      let g = Ppo.gamma ~dt:Trainer.dt and l = Ppo.lambda ~dt:Trainer.dt in
+      (* the catching step earns nothing, the n - 1 before it 1 - gamma each;
+         with lambda < 1 returns mix in the value network, so recompute *)
+      let rewards = Array.init n (fun i -> if i < n - 1 then 1. -. g else 0.) in
+      let _, ret =
+        Ppo.gae ~gamma:g ~lambda:l ~rewards
+          ~values:(Array.map (fun (s : Ppo.sample) -> s.ret -. s.adv) ex.hider) ()
+      in
+      assert_floats ret (Array.map (fun (s : Ppo.sample) -> s.ret) ex.hider);
+      assert_equal ~cmp:feq ~printer:string_of_float 0. ex.hider.(n - 1).ret );
+    ( "play_ppo time-out: last return bootstraps from the value" >:: fun _ ->
+      let o, _, ex = ppo_round ~time_limit:0.5 ~hider:true ~hunter:false () in
+      assert_equal Game.Hiders_win o;
+      let last = ex.hider.(Array.length ex.hider - 1) in
+      (* without bootstrapping it would be exactly the step's 1 - gamma *)
+      assert_bool "bootstrapped"
+        (Float.abs (last.ret -. (1. -. Ppo.gamma ~dt:Trainer.dt)) > 1e-6) );
     ( "play_ppo both ppo: one sample per step each" >:: fun _ ->
       let o, secs, ex = ppo_round ~hider:true ~hunter:true () in
       assert_bool "finished" (o <> Game.Ongoing);

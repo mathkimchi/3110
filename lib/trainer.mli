@@ -34,20 +34,11 @@ val hunter_rate : tally -> float
 
 (** {2 PPO rounds} *)
 
-val step_reward : World.t -> Entity.role -> float
-(** [step_reward w r] is the reward for side [r] after one step that ended in
-    [w]: the distance between the centers of the first hider and the first
-    hunter of [w], divided by [Ppo.arena] and multiplied by [dt]; positive for
-    [Hider] and negative for [Hunter].
-    Requires: [w] has at least one hider and one hunter. *)
-
-val terminal_value : float
-(** The size of [end_reward] for a finished round. *)
-
-val end_reward : Game.outcome -> Entity.role -> float
-(** [end_reward o r] is [terminal_value] if side [r] won outcome [o],
-    [-. terminal_value] if it lost,
-    and [0.] if [o] is [Ongoing]. *)
+val survival_reward : Entity.role -> float
+(** [survival_reward r] is what side [r] earns for a step the hider lives
+    through: [1. -. Ppo.gamma ~dt] for [Hider] and its negative for
+    [Hunter], so a hider's return is [1 - gamma^n] after surviving [n] more
+    steps. *)
 
 type experience = { hider : Ppo.sample array; hunter : Ppo.sample array }
 (** The steps each PPO side took in a round, in order, with advantages and
@@ -65,8 +56,10 @@ val play_ppo :
 (** [play_ppo rng ~time_limit ~hider ~hunter w] plays one round on [w] like
     [play]. The hider is driven by agent [hider] (sampling its moves with
     [rng]) or, if [None], by [Greedy_strategy]; likewise the hunter. Each
-    step a PPO side moves in earns it [step_reward], and its last step also
-    earns [end_reward] of the outcome. Is [(outcome, seconds, experience)].
+    step a PPO side moves in earns it [survival_reward] if the hider is
+    still alive after it. A catch ends a side's returns at [0.]; running
+    out of time bootstraps them from that side's value of the final world
+    (see [Ppo.gae]). Is [(outcome, seconds, experience)].
     After every step, [on_step g o] (default: does nothing) is called with
     the game and outcome after that step, e.g. to draw it.
     Raises [Invalid_argument] if [w] does not have exactly one hider and one
