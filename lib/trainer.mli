@@ -71,3 +71,17 @@ val check_files :
     options: saving to [out] or loading from [input] needs at least one PPO
     side. Raises [Invalid_argument] if neither side is PPO but [out] or
     [input] is given. *)
+
+(** {2 Window speed} *)
+
+val speeds : float list
+(** The speeds [>] and [<] step through in the training window, slowest
+    first: [1.], [5.], [20.] and [infinity] game seconds per real second. *)
+
+val faster : float -> float
+(** [faster s] is the slowest of [speeds] above [s], or [s] if there is
+    none. *)
+
+val slower : float -> float
+(** [slower s] is the fastest of [speeds] below [s], or [s] if there is
+    none. *)

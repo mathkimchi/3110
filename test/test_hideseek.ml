@@ -891,6 +891,25 @@ let weights_tests =
           | exception Failure _ -> ()) );
   ]
 
+let speed_tests =
+  let check name f x want =
+    name >:: fun _ -> assert_equal ~printer:string_of_float want (f x)
+  in
+  [
+    check "faster 1x is 5x" Trainer.faster 1. 5.;
+    check "faster 5x is 20x" Trainer.faster 5. 20.;
+    check "faster 20x is inf" Trainer.faster 20. infinity;
+    check "faster inf stays inf" Trainer.faster infinity infinity;
+    check "faster 3x is 5x" Trainer.faster 3. 5.;
+    check "faster 0.5x is 1x" Trainer.faster 0.5 1.;
+    check "slower inf is 20x" Trainer.slower infinity 20.;
+    check "slower 20x is 5x" Trainer.slower 20. 5.;
+    check "slower 5x is 1x" Trainer.slower 5. 1.;
+    check "slower 1x stays 1x" Trainer.slower 1. 1.;
+    check "slower 50x is 20x" Trainer.slower 50. 20.;
+    check "slower 0.5x stays 0.5x" Trainer.slower 0.5 0.5;
+  ]
+
 let suite =
   "hideseek" >::: [ "vec2d" >::: vec2d_tests; "rect" >::: rect_tests; "physics" >::: physics_tests; "game" >::: game_tests;
     "timer" >::: timer_tests; "display" >::: display_tests;
@@ -900,6 +919,6 @@ let suite =
     "user_input_strategy" >::: user_input_strategy_tests;
     "mlp" >::: mlp_tests; "ppo" >::: ppo_tests;
     "trainer_ppo" >::: trainer_ppo_tests;
-    "weights" >::: weights_tests ]
+    "weights" >::: weights_tests; "speed" >::: speed_tests ]
 
 let () = run_test_tt_main suite

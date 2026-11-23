@@ -132,3 +132,11 @@ let play_ppo ?(on_step = fun _ _ -> ()) rng ~time_limit ~hider ~hunter w =
 let check_files ~hider_ppo ~hunter_ppo ~out ~input =
   if (not (hider_ppo || hunter_ppo)) && (out <> None || input <> None) then
     invalid_arg "--out and --in need --hider=ppo or --hunter=ppo"
+
+let speeds = [ 1.; 5.; 20.; infinity ]
+
+let faster s =
+  match List.find_opt (fun x -> x > s) speeds with Some x -> x | None -> s
+
+let slower s =
+  match List.find_opt (fun x -> x < s) (List.rev speeds) with Some x -> x | None -> s
