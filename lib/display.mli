@@ -10,3 +10,6 @@ val draw_world : Game.t -> unit
 
 val draw_entities : Game.t -> unit
 (** [draw_entities g] draws the living entities in the game world. *)
+
+val draw_hud : Game.t -> Game.outcome -> unit
+(** [draw_hud g o] displays the remaining time and current game outcome. *)

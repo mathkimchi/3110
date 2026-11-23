@@ -5,7 +5,7 @@ let draw g outcome =
   Raylib.clear_background Raylib.Color.raywhite;
   Display.draw_world g;
   Display.draw_entities g;
-  Raylib.draw_text (Display.render g outcome) 10 10 20 Raylib.Color.black;
+  Display.draw_hud g outcome;
   Raylib.end_drawing ()
 
 (* one iteration per frame; once the game is over the world stops changing *)

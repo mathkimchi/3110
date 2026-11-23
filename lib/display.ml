@@ -47,3 +47,15 @@ let draw_entities g =
         color
   in
   List.iter draw_entity (World.entities w)
+
+let draw_hud g outcome =
+  let time_text = Printf.sprintf "Time: %.1f" (Game.time_left g)
+  in
+  let outcome_text =
+    match outcome with
+    | Game.Ongoing -> "Ongoing"
+    | Game.Hunters_win -> "Hunters win"
+    | Game.Hiders_win -> "Hiders win"
+  in
+  Raylib.draw_text time_text 10 10 20 Raylib.Color.black;
+  Raylib.draw_text outcome_text 10 35 20 Raylib.Color.black
