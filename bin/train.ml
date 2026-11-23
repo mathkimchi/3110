@@ -5,7 +5,7 @@
 open Hideseek
 
 let rounds = ref 100
-let time_limit = ref 20.
+let time_limit = ref 100.
 let seed = ref None
 let batch = ref 10
 let hider_ppo = ref true
@@ -31,7 +31,8 @@ let speclist =
         (fun t ->
           if t <= 0. then raise (Arg.Bad "--time must be greater than 0");
           time_limit := t),
-      " seconds the hiders must survive, e.g. --time=20 (the default)" );
+      " seconds before a round is cut off, e.g. --time=100 (the default); \
+       keep it well above Ppo.halflife so time left barely matters" );
     ( "--seed",
       Arg.Int (fun s -> seed := Some s),
       " seed for start positions and PPO, e.g. --seed=1 (default: random)" );
@@ -168,8 +169,9 @@ let () =
     start_agent rng "hunter" ~ppo:!hunter_ppo ~loaded:(from_file (fun w -> w.hunter))
   in
   let hider = Option.map Ppo.learner hider and hunter = Option.map Ppo.learner hunter in
-  (* [hider_xp] and [hunter_xp] are the experience since the last update *)
-  let rec loop i hider hunter hider_xp hunter_xp tally game_total wall_total =
+  (* [hider_xp] and [hunter_xp] are the experience since the last update,
+     [survived] the lengths of the rounds since then *)
+  let rec loop i hider hunter hider_xp hunter_xp survived tally game_total wall_total =
     if i > !rounds then (hider, hunter, tally, game_total, wall_total)
     else
       let w = Spawn.randomize rng World.default in
@@ -189,28 +191,50 @@ let () =
         (pct (Trainer.hunter_rate tally))
         (speedup ~game:secs ~wall);
       let hider_xp = ex.hider :: hider_xp and hunter_xp = ex.hunter :: hunter_xp in
+      let survived = secs :: survived in
       if i mod !batch = 0 || i = !rounds then begin
+        let n = List.length survived in
+        Printf.printf "  rounds %d-%d: average survival %.2f s\n%!" (i - n + 1) i
+          (List.fold_left ( +. ) 0. survived /. float n);
+        (* the updated learner and its losses on the batch it learned from *)
         let update l xp =
-          Option.map (fun l -> Ppo.update rng l (Array.concat (List.rev xp))) l
+          Option.map
+            (fun l ->
+              let samples = Array.concat (List.rev xp) in
+              let l = Ppo.update rng l samples in
+              (l, Ppo.losses l samples))
+            l
         in
         let t0 = Unix.gettimeofday () in
-        let hider = update hider hider_xp and hunter = update hunter hunter_xp in
-        if hider <> None || hunter <> None then
+        let hider_u = update hider hider_xp and hunter_u = update hunter hunter_xp in
+        let hider = Option.map fst hider_u and hunter = Option.map fst hunter_u in
+        if hider <> None || hunter <> None then begin
           Printf.printf "  updated after round %d in %.2f s\n%!" i
             (Unix.gettimeofday () -. t0);
-        loop (i + 1) hider hunter [] [] tally (game_total +. secs) (wall_total +. wall)
+          let report name =
+            Option.iter (fun (_, (p, v)) ->
+                Printf.printf "    %-6s policy loss %9.4f | value loss %12.4f\n%!" name p v)
+          in
+          report "hider" hider_u;
+          report "hunter" hunter_u
+        end;
+        loop (i + 1) hider hunter [] [] [] tally (game_total +. secs) (wall_total +. wall)
       end
-      else loop (i + 1) hider hunter hider_xp hunter_xp tally (game_total +. secs) (wall_total +. wall)
+      else
+        loop (i + 1) hider hunter hider_xp hunter_xp survived tally (game_total +. secs)
+          (wall_total +. wall)
   in
   let hider, hunter, tally, game_total, wall_total =
-    loop 1 hider hunter [] [] Trainer.empty 0. 0.
+    loop 1 hider hunter [] [] [] Trainer.empty 0. 0.
   in
   Printf.printf
-    "after %d rounds: hiders %d (%.1f%%), hunters %d (%.1f%%) | x%.1f overall\n"
+    "after %d rounds: hiders %d (%.1f%%), hunters %d (%.1f%%) | average \
+     survival %.2f s | x%.1f overall\n"
     (Trainer.rounds tally) (Trainer.hider_wins tally)
     (pct (Trainer.hider_rate tally))
     (Trainer.hunter_wins tally)
     (pct (Trainer.hunter_rate tally))
+    (game_total /. float (Trainer.rounds tally))
     (speedup ~game:game_total ~wall:wall_total);
   Display.unload_sprites sprites;
   Raylib.close_window ();

@@ -618,21 +618,43 @@ let ppo_tests =
     ( "gae with lambda 1 is the discounted return" >:: fun _ ->
       let adv, ret =
         Ppo.gae ~gamma:0.5 ~lambda:1. ~rewards:[| 1.; 2.; 4. |]
-          ~values:[| 1.; 1.; 1. |]
+          ~values:[| 1.; 1.; 1. |] ()
       in
       (* returns: 4, then 2 + 0.5*4 = 4, then 1 + 0.5*4 = 3 *)
       assert_floats [| 3.; 4.; 4. |] ret;
       assert_floats [| 2.; 3.; 3. |] adv );
     ( "gae with lambda 0 is one-step TD" >:: fun _ ->
       let adv, ret =
-        Ppo.gae ~gamma:0.5 ~lambda:0. ~rewards:[| 1.; 2. |] ~values:[| 2.; 4. |]
+        Ppo.gae ~gamma:0.5 ~lambda:0. ~rewards:[| 1.; 2. |] ~values:[| 2.; 4. |] ()
       in
       (* delta_0 = 1 + 0.5*4 - 2, delta_1 = 2 + 0 - 4 *)
       assert_floats [| 1.; -2. |] adv;
       assert_floats [| 3.; 2. |] ret );
+    ( "gamma halves the weight over one halflife" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float 0.5 (Ppo.gamma ~dt:Ppo.halflife) );
+    ( "gamma does not depend on the step size" >:: fun _ ->
+      (* 3 s ahead counts the same at 20 or 1000 steps per second *)
+      assert_equal ~cmp:feq ~printer:string_of_float
+        (Ppo.gamma ~dt:0.05 ** 60.)
+        (Ppo.gamma ~dt:0.001 ** 3000.) );
+    ( "lambda halves the weight over its halflife" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float 0.5
+        (Ppo.lambda ~dt:Ppo.lambda_halflife) );
+    ( "lambda does not depend on the step size" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float
+        (Ppo.lambda ~dt:0.05 ** 20.)
+        (Ppo.lambda ~dt:0.001 ** 1000.) );
+    ( "gae bootstraps from the value after a cut-off episode" >:: fun _ ->
+      let adv, ret =
+        Ppo.gae ~bootstrap:4. ~gamma:0.5 ~lambda:1. ~rewards:[| 1.; 2. |]
+          ~values:[| 1.; 1. |] ()
+      in
+      (* returns: 2 + 0.5*4 = 4, then 1 + 0.5*4 = 3 *)
+      assert_floats [| 3.; 4. |] ret;
+      assert_floats [| 2.; 3. |] adv );
     ( "gae length mismatch" >:: fun _ ->
       assert_raises (Invalid_argument "Ppo.gae: length mismatch") (fun () ->
-          Ppo.gae ~gamma:0.9 ~lambda:0.9 ~rewards:[| 1. |] ~values:[||]) );
+          Ppo.gae ~gamma:0.9 ~lambda:0.9 ~rewards:[| 1. |] ~values:[||] ()) );
     ( "observe: own center then opponent center, scaled" >:: fun _ ->
       let hider = List.hd (World.entities ppo_world) in
       assert_floats [| 35. /. 400.; 75. /. 400.; 195. /. 400.; 395. /. 400. |]
@@ -680,6 +702,26 @@ let ppo_tests =
       let o = [| 0.4; 0.4; 0.6; 0.1 |] in
       let a, l = Ppo.act (Random.State.make [| 3 |]) ag o in
       assert_equal ~cmp:feq ~printer:string_of_float l (Ppo.action_log_prob ag o a) );
+    ( "losses: value is the mean squared error" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 5 |]) in
+      let s = one_sample ag ~adv:1. ~ret:3. in
+      let s2 = { (one_sample ag ~adv:(-1.) ~ret:(-2.)) with obs = [| 0.7; 0.1; 0.3; 0.5 |] } in
+      let s2 = { s2 with logp = Ppo.action_log_prob ag s2.obs s2.act } in
+      let sq (x : Ppo.sample) = (Ppo.value ag x.obs -. x.ret) ** 2. in
+      let _, v = Ppo.losses (Ppo.learner ag) [| s; s2 |] in
+      assert_equal ~cmp:feq ~printer:string_of_float ((sq s +. sq s2) /. 2.) v );
+    ( "losses: policy is 0 before any update" >:: fun _ ->
+      (* ratio 1 everywhere, so the loss is minus the mean normalized
+         advantage, which is 0 *)
+      let ag = Ppo.init (Random.State.make [| 5 |]) in
+      let s = one_sample ag ~adv:1. ~ret:0. in
+      let bad = { s with act = Array.map (fun x -> -.x) s.act; adv = -1. } in
+      let bad = { bad with logp = Ppo.action_log_prob ag bad.obs bad.act } in
+      let p, _ = Ppo.losses (Ppo.learner ag) [| s; bad |] in
+      assert_equal ~cmp:feq ~printer:string_of_float 0. p );
+    ( "losses of an empty batch are nan" >:: fun _ ->
+      let p, v = Ppo.losses (Ppo.learner (Ppo.init (Random.State.make [| 5 |]))) [||] in
+      assert_bool "nan" (Float.is_nan p && Float.is_nan v) );
     ( "update with an empty batch changes nothing" >:: fun _ ->
       let ag = Ppo.init (Random.State.make [| 5 |]) in
       let ag' = Ppo.agent (Ppo.update (Random.State.make [| 1 |]) (Ppo.learner ag) [||]) in
@@ -717,19 +759,34 @@ let check ~h ~u ~out ~input () =
 
 let trainer_ppo_tests =
   [
-    ( "step_reward is +-dist/arena*dt" >:: fun _ ->
-      (* centers (35, 75) and (195, 395): dist = sqrt (160^2 + 320^2) *)
-      let r = sqrt ((160. ** 2.) +. (320. ** 2.)) /. 400. *. Trainer.dt in
+    ( "survival_reward is +-(1 - gamma)" >:: fun _ ->
+      let r = 1. -. Ppo.gamma ~dt:Trainer.dt in
       assert_equal ~cmp:feq ~printer:string_of_float r
-        (Trainer.step_reward ppo_world Entity.Hider);
+        (Trainer.survival_reward Entity.Hider);
       assert_equal ~cmp:feq ~printer:string_of_float (-.r)
-        (Trainer.step_reward ppo_world Entity.Hunter) );
-    ( "end_reward" >:: fun _ ->
-      assert_equal 1. (Trainer.end_reward Game.Hiders_win Entity.Hider);
-      assert_equal (-1.) (Trainer.end_reward Game.Hiders_win Entity.Hunter);
-      assert_equal 1. (Trainer.end_reward Game.Hunters_win Entity.Hunter);
-      assert_equal (-1.) (Trainer.end_reward Game.Hunters_win Entity.Hider);
-      assert_equal 0. (Trainer.end_reward Game.Ongoing Entity.Hider) );
+        (Trainer.survival_reward Entity.Hunter) );
+    ( "play_ppo caught hider: return is 1 - gamma^steps survived" >:: fun _ ->
+      let o, _, ex = ppo_round ~time_limit:60. ~hider:true ~hunter:false () in
+      assert_equal ~printer:(fun o -> if o = Game.Hunters_win then "caught" else "not caught")
+        Game.Hunters_win o;
+      let n = Array.length ex.hider in
+      let g = Ppo.gamma ~dt:Trainer.dt and l = Ppo.lambda ~dt:Trainer.dt in
+      (* the catching step earns nothing, the n - 1 before it 1 - gamma each;
+         with lambda < 1 returns mix in the value network, so recompute *)
+      let rewards = Array.init n (fun i -> if i < n - 1 then 1. -. g else 0.) in
+      let _, ret =
+        Ppo.gae ~gamma:g ~lambda:l ~rewards
+          ~values:(Array.map (fun (s : Ppo.sample) -> s.ret -. s.adv) ex.hider) ()
+      in
+      assert_floats ret (Array.map (fun (s : Ppo.sample) -> s.ret) ex.hider);
+      assert_equal ~cmp:feq ~printer:string_of_float 0. ex.hider.(n - 1).ret );
+    ( "play_ppo time-out: last return bootstraps from the value" >:: fun _ ->
+      let o, _, ex = ppo_round ~time_limit:0.5 ~hider:true ~hunter:false () in
+      assert_equal Game.Hiders_win o;
+      let last = ex.hider.(Array.length ex.hider - 1) in
+      (* without bootstrapping it would be exactly the step's 1 - gamma *)
+      assert_bool "bootstrapped"
+        (Float.abs (last.ret -. (1. -. Ppo.gamma ~dt:Trainer.dt)) > 1e-6) );
     ( "play_ppo both ppo: one sample per step each" >:: fun _ ->
       let o, secs, ex = ppo_round ~hider:true ~hunter:true () in
       assert_bool "finished" (o <> Game.Ongoing);

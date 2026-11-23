@@ -3,19 +3,28 @@
     position is. Both are [Mlp]s of widths 4-5-5-2 (policy) and 4-5-5-1
     (value), as in issue #29.
 
-    Hyperparameters: discount 0.99, GAE lambda 0.95, clip 0.2, Adam with
-    learning rate 3e-4, 4 epochs of minibatches of 256 per update. *)
+    Hyperparameters: discount halflife 20 s, GAE lambda halflife 5 s,
+    clip 0.2, Adam with learning rate 3e-3, 4 epochs of minibatches of 256
+    per update. *)
 
 val arena : float
 (** [400.], the size of [World.default]; positions are divided by it so the
     networks see numbers around [0., 1.]. *)
 
-val gamma : float
-(** [0.99], the discount per step that [update]'s caller should pass to
-    [gae]. *)
+val halflife : float
+(** [20.], the discount halflife in game seconds. *)
 
-val lambda : float
-(** [0.95], the GAE lambda to pass to [gae]. *)
+val gamma : dt:float -> float
+(** [gamma ~dt] is [0.5 ** (dt /. halflife)], the per-step discount to pass
+    to [gae] for steps [dt] game seconds apart, so a reward [halflife]
+    seconds ahead counts half whatever [dt] is. *)
+
+val lambda_halflife : float
+(** [5.], the GAE lambda halflife in game seconds. *)
+
+val lambda : dt:float -> float
+(** [lambda ~dt] is [0.5 ** (dt /. lambda_halflife)], the GAE lambda to pass
+    to [gae] for steps [dt] game seconds apart. *)
 
 type agent
 (** A policy network, a value network and a log standard deviation per
@@ -53,13 +62,18 @@ val value : agent -> float array -> float
 (** [value ag o] is [ag]'s value network on observation [o]. *)
 
 val gae :
+  ?bootstrap:float ->
   gamma:float ->
   lambda:float ->
   rewards:float array ->
   values:float array ->
+  unit ->
   float array * float array
-(** [gae ~gamma ~lambda ~rewards ~values] is [(advantages, returns)] for one
-    episode that ends after its last step (the value after it is [0.]):
+(** [gae ~bootstrap ~gamma ~lambda ~rewards ~values ()] is
+    [(advantages, returns)] for one episode whose value after its last step
+    is [bootstrap]: [0.] (the default) if the episode really ended there, or
+    the value network's guess for the state it stopped in if it was cut off
+    by a time limit:
     [delta_t = r_t + gamma * v_(t+1) - v_t],
     [adv_t = delta_t + gamma * lambda * adv_(t+1)] and
     [ret_t = adv_t + v_t].
@@ -89,6 +103,14 @@ val update : Random.State.t -> learner -> sample array -> learner
     split into minibatches, and each minibatch takes one Adam step on the
     clipped policy loss (policy and [log_std]) and one on the squared error
     of the value network. [l] unchanged if [samples] is empty. *)
+
+val losses : learner -> sample array -> float * float
+(** [losses l samples] is [(policy, value)]: the clipped policy loss and the
+    value network's mean squared error that [update] minimizes, for [l]'s
+    current networks on all of [samples] (advantages normalized as in
+    [update]). A value loss that stays high while the policy loss settles
+    hints that the value network is too small for the returns.
+    [(nan, nan)] if [samples] is empty. *)
 
 val write : out_channel -> agent -> unit
 (** [write oc ag] writes [ag]'s networks and [log_std] to [oc] as text. *)

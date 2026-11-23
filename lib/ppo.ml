@@ -1,21 +1,74 @@
 module N = Mlp.N
 module AD = Mlp.AD
 
+(* ---------- hyperparameters ---------- *)
+
+(* Width of [World.default] in pixels. Positions are divided by this so the
+   networks get inputs around 0..1. *)
 let arena = 400.
-let gamma = 0.99
-let lambda = 0.95
+
+(* Discount halflife in game seconds: a reward this far ahead counts half
+   as much as one now, 2 halflives a quarter, and so on, whatever the step
+   size. A hider's return is 1 - 0.5^(seconds survived / halflife) (see
+   [Trainer.survival_reward]), so this is also the survival time that
+   scores 0.5. Lower it to make the agents care more about the near
+   future; keep the round length (--time) well above it. *)
+let halflife = 20.
+
+(* The per-step discount for steps [dt] seconds apart: 0.5^(dt / halflife).
+   At [Trainer.dt] = 0.05 that is about 0.9983. *)
+let gamma ~dt = 0.5 ** (dt /. halflife)
+
+(* GAE lambda: how far advantages look ahead before trusting the value
+   network. 0 = one-step TD (low variance, biased by a bad critic); 1 = full
+   Monte Carlo return (unbiased, noisy); 0.95 is the usual middle.
+   Set as a halflife in game seconds, like [halflife]: after this long, the
+   advantage leans half on the rewards seen and half on the value network.
+   5 s gives lambda of about 0.993 at [Trainer.dt] = 0.05. At 0.7 s
+   (lambda 0.95) the hider only saw about a second ahead, learned to run
+   straight away from the hunter and got cornered (survival fell from ~10 s
+   to ~6 s); at 5 s it learned to survive ~25 s on average over 200 rounds
+   against the greedy hunter. Raising it to [halflife] would almost turn
+   off what GAE does. *)
+let lambda_halflife = 5.
+
+(* The per-step GAE lambda for steps [dt] seconds apart. *)
+let lambda ~dt = 0.5 ** (dt /. lambda_halflife)
+
+(* PPO clip range. In one update the new/old action probability ratio only
+   counts inside [1 - clip, 1 + clip], so the policy cannot move too far
+   from the one that collected the data. Smaller = more cautious updates. *)
 let clip = 0.2
-let lr = 3e-4
+
+(* Adam learning rate for both the policy and value networks. Too high and
+   training swings or diverges; too low and it barely moves. At 3e-4 the
+   policy hardly changed in 200 rounds (its mean stayed about 0.1 against
+   noise of std 1, so the hider wandered at random). *)
+let lr = 3e-3
+
+(* Passes over the same batch of samples per update. More reuses data
+   harder but drifts further from the data-collecting policy (clip only
+   partly guards against that). *)
 let epochs = 4
+
+(* Samples per gradient step. One round of 20 s is about 400 samples per
+   side, so --batch=10 rounds gives roughly 16 steps per epoch. Smaller =
+   more, noisier steps. *)
 let minibatch = 256
+
 let log_2pi = log (2. *. Float.pi)
 
 type agent = { policy : Mlp.t; value : Mlp.t; log_std : float array }
 
+(* Layer widths: 4 inputs (see [observe]), two hidden layers of 5, then 2
+   outputs (the mean move x, y) for the policy or 1 (the expected return)
+   for the value network. Wider/deeper can learn more but trains slower.
+   [log_std] is the log of the exploration noise on each action; 0 means
+   standard deviation 1, and it is learned along with the policy. *)
 let init rng =
   {
     policy = Mlp.init rng [ 4; 5; 5; 2 ];
-    value = Mlp.init rng [ 4; 5; 5; 1 ];
+    value = Mlp.init rng [ 4; 16; 16; 16; 1 ];
     log_std = [| 0.; 0. |];
   }
 
@@ -69,11 +122,11 @@ let value ag o = (Mlp.forward ag.value o).(0)
 
 (* ---------- advantages ---------- *)
 
-let gae ~gamma ~lambda ~rewards ~values =
+let gae ?(bootstrap = 0.) ~gamma ~lambda ~rewards ~values () =
   let n = Array.length rewards in
   if Array.length values <> n then invalid_arg "Ppo.gae: length mismatch";
   let adv = Array.make n 0. in
-  let next_adv = ref 0. and next_v = ref 0. in
+  let next_adv = ref 0. and next_v = ref bootstrap in
   for t = n - 1 downto 0 do
     let delta = rewards.(t) +. (gamma *. !next_v) -. values.(t) in
     adv.(t) <- delta +. (gamma *. lambda *. !next_adv);
@@ -99,6 +152,10 @@ let adam_init params =
   let z = List.map (fun p -> N.zeros (N.shape p)) params in
   { m = z; v = z; steps = 0 }
 
+(* Adam's standard settings. beta1: decay of the running mean of gradients
+   (momentum). beta2: decay of the running mean of squared gradients (the
+   per-parameter step scale). eps: keeps the division away from 0. Rarely
+   worth changing. *)
 let beta1 = 0.9
 let beta2 = 0.999
 let eps = 1e-8
@@ -233,6 +290,13 @@ let update rng l samples =
         epoch (e - 1) (go 0 l)
     in
     epoch epochs l
+
+let losses l samples =
+  if Array.length samples = 0 then (nan, nan)
+  else
+    let s = normalize_adv samples in
+    let eval loss ps = AD.unpack_flt (loss s (List.map AD.pack_arr ps)) in
+    (eval policy_loss (policy_params l.ag), eval value_loss (Mlp.params l.ag.value))
 
 (* ---------- saving ---------- *)
 
