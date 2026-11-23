@@ -315,6 +315,10 @@ let world_tests =
     ids_test "hunters" [ 1 ] (World.hunters w);
     ids_test "entities_by_role Hider" [ 0; 2 ] (World.entities_by_role w Entity.Hider);
     ids_test "no hunters" [] (World.hunters (World.init ~walls:[] ~entities:[ h0 ]));
+    ( "default hunter is slower than the hider" >:: fun _ ->
+      let w = World.default in
+      let hider = List.hd (World.hiders w) and hunter = List.hd (World.hunters w) in
+      assert_bool "hunter speed < hider speed" (hunter.speed < hider.speed) );
   ]
 
 (* ---------- Strategy ---------- *)

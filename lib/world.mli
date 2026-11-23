@@ -27,4 +27,4 @@ val with_entities : t -> Entity.t list -> t
 val default : t
 (** A small hard-coded map for the prototype: a walled 400x400 arena with one
     wall in the middle, the hider in the top-left and one hunter in the
-    bottom-right. *)
+    bottom-right. The hunter (speed 90) is slower than the hider (speed 120). *)
