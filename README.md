@@ -46,8 +46,9 @@ the sides that were PPO. `--out` and `--in` need at least one PPO side.
 
 The trainer shows each round in a window. `--speed` sets how many game
 seconds pass per real second (default 1); `--speed=0` or `--speed=inf` runs
-as fast as possible. Closing the window (or pressing Q) quits right away
-without saving.
+as fast as possible. While it runs, `>` and `<` in the window step the speed
+through 1x, 5x, 20x and as fast as possible. Closing the window (or pressing
+Q) quits right away without saving.
 
 ```sh
 dune exec bin/train.exe -- --speed=5

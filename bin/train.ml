@@ -1,6 +1,7 @@
 (* Training runner: plays rounds on the default map in a window at --speed
-   times real time, each from random start positions, trains the PPO sides
-   every --batch rounds and prints the running win rate. Closing the window
+   times real time (> and < in the window change it), each from random
+   start positions, trains the PPO sides every --batch rounds and prints
+   the running win rate. Closing the window
    quits right away without saving. *)
 open Hideseek
 
@@ -85,10 +86,14 @@ let frame = 1. /. 60.
 
 (* [show sprites t0 time_limit] is the [on_step] for a round that started at
    wall-clock time [t0]: it waits until the game is no more than --speed
-   times ahead of the wall clock, then draws a frame if one is due. Quits
-   the program if the window was closed. *)
+   times ahead of the wall clock, then draws a frame if one is due. After
+   each frame, > and < step --speed through [Trainer.speeds]. Quits the
+   program if the window was closed. *)
 let show sprites t0 time_limit =
   let last_draw = ref neg_infinity in
+  (* the wall-clock time and game seconds played when the pacing restarted:
+     at the start of the round and whenever the speed changes *)
+  let anchor = ref (t0, 0.) in
   fun g o ->
     if Raylib.window_should_close () then begin
       Display.unload_sprites sprites;
@@ -96,12 +101,25 @@ let show sprites t0 time_limit =
       exit 0
     end;
     let played = time_limit -. Game.time_left g in
-    let ahead = t0 +. (played /. !speed) -. Unix.gettimeofday () in
+    let wall0, played0 = !anchor in
+    let ahead = wall0 +. ((played -. played0) /. !speed) -. Unix.gettimeofday () in
     if ahead > 0. then Unix.sleepf ahead;
     let now = Unix.gettimeofday () in
     if now -. !last_draw >= frame || o <> Game.Ongoing then begin
       Display.draw sprites g o;
-      last_draw := now
+      last_draw := now;
+      (* Raylib reads the keyboard while drawing, so a key press is seen
+         once per frame; > and < are shift+period and shift+comma *)
+      let s =
+        if Raylib.is_key_pressed Raylib.Key.Period then Trainer.faster !speed
+        else if Raylib.is_key_pressed Raylib.Key.Comma then Trainer.slower !speed
+        else !speed
+      in
+      if s <> !speed then begin
+        speed := s;
+        anchor := (Unix.gettimeofday (), played);
+        Printf.printf "speed x%g\n%!" s
+      end
     end
 
 let fail msg =
