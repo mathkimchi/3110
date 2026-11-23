@@ -24,8 +24,10 @@ let default =
       rect 190. 100. 20. 200.; (* middle *)
     ]
   in
+  (* the hunter is slower so a careful hider can outrun it *)
+  let speed = function Entity.Hider -> 120. | Entity.Hunter -> 90. in
   let entity id role x y : Entity.t =
-    { id; role; pos = Vec2d.{ x; y }; size = 20.; speed = 120.; alive = true }
+    { id; role; pos = Vec2d.{ x; y }; size = 20.; speed = speed role; alive = true }
   in
   {
     walls;
