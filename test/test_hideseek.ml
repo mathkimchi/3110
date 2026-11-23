@@ -752,6 +752,16 @@ let trainer_ppo_tests =
       assert_floats
         (Array.map (fun (s : Ppo.sample) -> s.ret) e1.hider)
         (Array.map (fun (s : Ppo.sample) -> s.ret) e2.hider) );
+    ( "play_ppo calls on_step once per step" >:: fun _ ->
+      let calls = ref 0 and last = ref Game.Ongoing in
+      let o, _, _ =
+        Trainer.play_ppo
+          ~on_step:(fun _ o -> incr calls; last := o)
+          (Random.State.make [| 0 |]) ~time_limit:1. ~hider:None ~hunter:None
+          World.default
+      in
+      assert_bool "called" (!calls > 0);
+      assert_equal o !last );
     ( "play_ppo rejects two hiders" >:: fun _ ->
       let w =
         World.init ~walls:[]

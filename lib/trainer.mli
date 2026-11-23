@@ -51,6 +51,7 @@ type experience = { hider : Ppo.sample array; hunter : Ppo.sample array }
     played by [Greedy_strategy] has no samples. *)
 
 val play_ppo :
+  ?on_step:(Game.t -> Game.outcome -> unit) ->
   Random.State.t ->
   time_limit:float ->
   hider:Ppo.agent option ->
@@ -62,6 +63,8 @@ val play_ppo :
     [rng]) or, if [None], by [Greedy_strategy]; likewise the hunter. Each
     step a PPO side moves in earns it [step_reward], and its last step also
     earns [end_reward] of the outcome. Is [(outcome, seconds, experience)].
+    After every step, [on_step g o] (default: does nothing) is called with
+    the game and outcome after that step, e.g. to draw it.
     Raises [Invalid_argument] if [w] does not have exactly one hider and one
     hunter, or if [time_limit <= 0.]. *)
 
