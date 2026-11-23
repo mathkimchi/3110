@@ -332,6 +332,109 @@ let strategy_tests =
       assert_equal ~cmp:feq ~printer:string_of_float ~msg:"y" 0. dir.y );
   ]
 
+(* ---------- Spawn ---------- *)
+
+let positions w = List.map (fun (e : Entity.t) -> (e.pos.x, e.pos.y)) (World.entities w)
+let spawn seed = Spawn.randomize (Random.State.make [| seed |]) World.default
+let seeds = List.init 200 Fun.id
+
+(* [for_all_spawns f] checks [f] on the default world spawned from many seeds *)
+let for_all_spawns f = List.iter (fun seed -> f seed (spawn seed)) seeds
+
+let center (e : Entity.t) = Rect.center (Entity.hitbox e)
+
+let spawn_tests =
+  [
+    ( "same seed gives the same positions" >:: fun _ ->
+      assert_equal (positions (spawn 7)) (positions (spawn 7)) );
+    ( "different seeds give different positions" >:: fun _ ->
+      assert_bool "positions differ" (positions (spawn 1) <> positions (spawn 2)) );
+    ( "keeps every field but pos, in order" >:: fun _ ->
+      let strip (e : Entity.t) = { e with pos = Vec2d.zero } in
+      assert_equal
+        (List.map strip (World.entities World.default))
+        (List.map strip (World.entities (spawn 3))) );
+    ( "keeps the walls" >:: fun _ ->
+      assert_equal (World.walls World.default) (World.walls (spawn 3)) );
+    ( "nobody spawns in a wall" >:: fun _ ->
+      for_all_spawns (fun seed w ->
+          List.iter
+            (fun e ->
+              List.iter
+                (fun wall ->
+                  assert_bool (Printf.sprintf "seed %d" seed)
+                    (not (Rect.overlaps wall (Entity.hitbox e))))
+                (World.walls w))
+            (World.entities w)) );
+    ( "everyone spawns inside the arena" >:: fun _ ->
+      for_all_spawns (fun seed w ->
+          List.iter
+            (fun (e : Entity.t) ->
+              assert_bool (Printf.sprintf "seed %d" seed)
+                (e.pos.x >= 0. && e.pos.y >= 0.
+                && e.pos.x +. e.size <= 400. && e.pos.y +. e.size <= 400.))
+            (World.entities w)) );
+    ( "players spawn at least min_gap apart" >:: fun _ ->
+      for_all_spawns (fun seed w ->
+          match World.entities w with
+          | [ a; b ] ->
+              assert_bool (Printf.sprintf "seed %d" seed)
+                (Vec2d.dist (center a) (center b) >= 100.)
+          | _ -> assert_failure "expected two entities") );
+    ( "custom min_gap is respected" >:: fun _ ->
+      List.iter
+        (fun seed ->
+          let w = Spawn.randomize ~min_gap:250. (Random.State.make [| seed |]) World.default in
+          match World.entities w with
+          | [ a; b ] -> assert_bool "gap" (Vec2d.dist (center a) (center b) >= 250.)
+          | _ -> assert_failure "expected two entities")
+        seeds );
+    ( "impossible gap raises Failure" >:: fun _ ->
+      match Spawn.randomize ~min_gap:10_000. (Random.State.make [| 0 |]) World.default with
+      | _ -> assert_failure "expected Failure"
+      | exception Failure _ -> () );
+  ]
+
+(* ---------- Trainer ---------- *)
+
+let tally_of = List.fold_left Trainer.record Trainer.empty
+let assert_rate expected got =
+  assert_equal ~cmp:feq ~printer:string_of_float expected got
+
+let trainer_tests =
+  let greedy = (module Greedy_strategy : Strategy.S)
+  and stay = (module Strategy.Stay : Strategy.S) in
+  let hunter = mk ~id:1 ~role:Entity.Hunter ~speed:100. 200. 0. in
+  [
+    ( "dt is 20 steps per second" >:: fun _ -> assert_rate 0.05 Trainer.dt );
+    ( "hunter catches a hider that stays" >:: fun _ ->
+      let w = World.init ~walls:[] ~entities:[ mk 0. 0.; hunter ] in
+      let o, secs = Trainer.play (Game.init ~time_limit:20. w [ stay; greedy ]) in
+      assert_outcome Game.Hunters_win o;
+      (* 200 px at 100 px/s, minus the 10 px the boxes need to touch *)
+      assert_bool "about 1.9 s" (secs > 1.8 && secs < 2.0) );
+    ( "hider walled off survives the whole time" >:: fun _ ->
+      let wall = Rect.{ pos = Vec2d.{ x = 100.; y = -1000. }; w = 10.; h = 2000. } in
+      let w = World.init ~walls:[ wall ] ~entities:[ mk 0. 0.; hunter ] in
+      let o, secs = Trainer.play (Game.init ~time_limit:3. w [ stay; greedy ]) in
+      assert_outcome Game.Hiders_win o;
+      assert_rate 3. secs );
+    ( "empty tally has no rounds" >:: fun _ ->
+      assert_equal 0 (Trainer.rounds Trainer.empty);
+      assert_rate 0. (Trainer.hider_rate Trainer.empty);
+      assert_rate 0. (Trainer.hunter_rate Trainer.empty) );
+    ( "tally counts each side" >:: fun _ ->
+      let t = tally_of Game.[ Hiders_win; Hunters_win; Hiders_win; Hiders_win ] in
+      assert_equal ~printer:string_of_int 4 (Trainer.rounds t);
+      assert_equal ~printer:string_of_int 3 (Trainer.hider_wins t);
+      assert_equal ~printer:string_of_int 1 (Trainer.hunter_wins t);
+      assert_rate 0.75 (Trainer.hider_rate t);
+      assert_rate 0.25 (Trainer.hunter_rate t) );
+    ( "record rejects Ongoing" >:: fun _ ->
+      assert_raises (Invalid_argument "Trainer.record: game is still ongoing")
+        (fun () -> Trainer.record Trainer.empty Game.Ongoing) );
+  ]
+
 (* ---------- Greedy_strategy ---------- *)
 
 (* directions may have any length, so compare them normalized *)
@@ -409,6 +512,7 @@ let suite =
   "hideseek" >::: [ "vec2d" >::: vec2d_tests; "rect" >::: rect_tests; "physics" >::: physics_tests; "game" >::: game_tests;
     "timer" >::: timer_tests; "display" >::: display_tests;
     "world" >::: world_tests; "strategy" >::: strategy_tests;
+    "spawn" >::: spawn_tests; "trainer" >::: trainer_tests;
     "greedy_strategy" >::: greedy_strategy_tests;
     "user_input_strategy" >::: user_input_strategy_tests ]
 

@@ -10,24 +10,27 @@ Team 3: The HALK
 
 ## Run instructions
 
-Currently, just run:
+To play the game, run:
 
 ```sh
 dune exec bin/main.exe
+# with options: (default 20 sec)
+dune exec bin/main.exe -- --time=30
 ```
 
-On wayland, you can run:
+To run the trainer, run:
+
+```sh
+dune exec bin/train.exe
+# default rounds is 100
+dune exec bin/train.exe -- --rounds=100 --time=30 --seed=1
+```
+
+On wayland, you might need to run:
 
 ```sh
 xwayland-satellite :1
 DISPLAY=:1 dune exec bin/main.exe
-```
-
-The hiders win by surviving until the timer runs out (20 seconds by default).
-To change it, pass `--time`:
-
-```sh
-dune exec bin/main.exe -- --time=30
 ```
 
 ## Coding Practices
