@@ -3,8 +3,8 @@
     position is. Both are [Mlp]s of widths 4-5-5-2 (policy) and 4-5-5-1
     (value), as in issue #29.
 
-    Hyperparameters: discount halflife 20 s, GAE lambda halflife 0.7 s,
-    clip 0.2, Adam with learning rate 3e-4, 4 epochs of minibatches of 256
+    Hyperparameters: discount halflife 20 s, GAE lambda halflife 5 s,
+    clip 0.2, Adam with learning rate 3e-3, 4 epochs of minibatches of 256
     per update. *)
 
 val arena : float
@@ -20,7 +20,7 @@ val gamma : dt:float -> float
     seconds ahead counts half whatever [dt] is. *)
 
 val lambda_halflife : float
-(** [0.7], the GAE lambda halflife in game seconds. *)
+(** [5.], the GAE lambda halflife in game seconds. *)
 
 val lambda : dt:float -> float
 (** [lambda ~dt] is [0.5 ** (dt /. lambda_halflife)], the GAE lambda to pass

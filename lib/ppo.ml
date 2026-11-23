@@ -24,9 +24,13 @@ let gamma ~dt = 0.5 ** (dt /. halflife)
    Monte Carlo return (unbiased, noisy); 0.95 is the usual middle.
    Set as a halflife in game seconds, like [halflife]: after this long, the
    advantage leans half on the rewards seen and half on the value network.
-   0.7 s gives lambda of about 0.95 at [Trainer.dt] = 0.05. Raising it to
-   [halflife] (lambda about 0.998) would almost turn off what GAE does. *)
-let lambda_halflife = 0.7
+   5 s gives lambda of about 0.993 at [Trainer.dt] = 0.05. At 0.7 s
+   (lambda 0.95) the hider only saw about a second ahead, learned to run
+   straight away from the hunter and got cornered (survival fell from ~10 s
+   to ~6 s); at 5 s it learned to survive ~25 s on average over 200 rounds
+   against the greedy hunter. Raising it to [halflife] would almost turn
+   off what GAE does. *)
+let lambda_halflife = 5.
 
 (* The per-step GAE lambda for steps [dt] seconds apart. *)
 let lambda ~dt = 0.5 ** (dt /. lambda_halflife)
@@ -37,8 +41,10 @@ let lambda ~dt = 0.5 ** (dt /. lambda_halflife)
 let clip = 0.2
 
 (* Adam learning rate for both the policy and value networks. Too high and
-   training swings or diverges; too low and it barely moves. *)
-let lr = 3e-4
+   training swings or diverges; too low and it barely moves. At 3e-4 the
+   policy hardly changed in 200 rounds (its mean stayed about 0.1 against
+   noise of std 1, so the hider wandered at random). *)
+let lr = 3e-3
 
 (* Passes over the same batch of samples per update. More reuses data
    harder but drifts further from the data-collecting policy (clip only
