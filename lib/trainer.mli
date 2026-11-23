@@ -31,3 +31,43 @@ val hider_rate : tally -> float
 val hunter_rate : tally -> float
 (** [hunter_rate t] is the fraction of rounds in [t] the hunters won, in
     [0., 1.]; [0.] if there are no rounds. *)
+
+(** {2 PPO rounds} *)
+
+val step_reward : World.t -> Entity.role -> float
+(** [step_reward w r] is the reward for side [r] after one step that ended in
+    [w]: the distance between the centers of the first hider and the first
+    hunter of [w], divided by [Ppo.arena] and multiplied by [dt]; positive for
+    [Hider] and negative for [Hunter].
+    Requires: [w] has at least one hider and one hunter. *)
+
+val end_reward : Game.outcome -> Entity.role -> float
+(** [end_reward o r] is [1.] if side [r] won outcome [o], [-1.] if it lost,
+    and [0.] if [o] is [Ongoing]. *)
+
+type experience = { hider : Ppo.sample array; hunter : Ppo.sample array }
+(** The steps each PPO side took in a round, in order, with advantages and
+    returns from [Ppo.gae ~gamma:Ppo.gamma ~lambda:Ppo.lambda]. A side
+    played by [Greedy_strategy] has no samples. *)
+
+val play_ppo :
+  Random.State.t ->
+  time_limit:float ->
+  hider:Ppo.agent option ->
+  hunter:Ppo.agent option ->
+  World.t ->
+  Game.outcome * float * experience
+(** [play_ppo rng ~time_limit ~hider ~hunter w] plays one round on [w] like
+    [play]. The hider is driven by agent [hider] (sampling its moves with
+    [rng]) or, if [None], by [Greedy_strategy]; likewise the hunter. Each
+    step a PPO side moves in earns it [step_reward], and its last step also
+    earns [end_reward] of the outcome. Is [(outcome, seconds, experience)].
+    Raises [Invalid_argument] if [w] does not have exactly one hider and one
+    hunter, or if [time_limit <= 0.]. *)
+
+val check_files :
+  hider_ppo:bool -> hunter_ppo:bool -> out:string option -> input:string option -> unit
+(** [check_files ~hider_ppo ~hunter_ppo ~out ~input] checks the training
+    options: saving to [out] or loading from [input] needs at least one PPO
+    side. Raises [Invalid_argument] if neither side is PPO but [out] or
+    [input] is given. *)

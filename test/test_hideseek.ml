@@ -508,12 +508,331 @@ let user_input_strategy_tests =
       keys_test "other keys ignored" [ Q; Space ] ~x:0. ~y:0.;
     ]
 
+(* ---------- Mlp ---------- *)
+
+let arr2 rows cols xs = Mlp.N.of_array xs [| rows; cols |]
+
+(* 2 -> 2 -> 1 with identity first layer and summing output layer, bias 0.5 *)
+let small_mlp () =
+  Mlp.with_params
+    (Mlp.init (Random.State.make [| 0 |]) [ 2; 2; 1 ])
+    [
+      arr2 2 2 [| 1.; 0.; 0.; 1. |];
+      arr2 1 2 [| 0.; 0. |];
+      arr2 2 1 [| 1.; 1. |];
+      arr2 1 1 [| 0.5 |];
+    ]
+
+(* writes [n] to a temp file and reads it back *)
+let round_trip n =
+  let file = Filename.temp_file "mlp" ".txt" in
+  let oc = open_out file in
+  Mlp.write oc n;
+  close_out oc;
+  let ic = Scanf.Scanning.open_in file in
+  let n' = Mlp.read ic in
+  Scanf.Scanning.close_in ic;
+  Sys.remove file;
+  n'
+
+let float_array_printer a =
+  "[" ^ String.concat "; " (Array.to_list (Array.map string_of_float a)) ^ "]"
+
+let mlp_tests =
+  [
+    ( "init keeps sizes" >:: fun _ ->
+      assert_equal [ 4; 5; 5; 2 ]
+        (Mlp.sizes (Mlp.init (Random.State.make [| 1 |]) [ 4; 5; 5; 2 ])) );
+    ( "forward output length" >:: fun _ ->
+      let n = Mlp.init (Random.State.make [| 1 |]) [ 4; 5; 5; 2 ] in
+      assert_equal 2 (Array.length (Mlp.forward n [| 0.1; 0.2; 0.3; 0.4 |])) );
+    ( "forward: tanh hidden, linear output" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float
+        (tanh 1. +. tanh (-2.) +. 0.5)
+        (Mlp.forward (small_mlp ()) [| 1.; -2. |]).(0) );
+    ( "forward wrong input length" >:: fun _ ->
+      assert_raises (Invalid_argument "Mlp.forward: input has the wrong length")
+        (fun () -> Mlp.forward (small_mlp ()) [| 1. |]) );
+    ( "init rejects one layer" >:: fun _ ->
+      assert_raises
+        (Invalid_argument "Mlp.init: need at least two positive layer widths")
+        (fun () -> Mlp.init (Random.State.make [| 1 |]) [ 4 ]) );
+    ( "with_params rejects a bad shape" >:: fun _ ->
+      assert_raises (Invalid_argument "Mlp.with_params: shape mismatch")
+        (fun () ->
+          Mlp.with_params (small_mlp ())
+            [ arr2 1 2 [| 1.; 1. |]; arr2 1 2 [| 0.; 0. |]; arr2 2 1 [| 1.; 1. |]; arr2 1 1 [| 0. |] ]) );
+    ( "same seed, same network" >:: fun _ ->
+      let mk () = Mlp.init (Random.State.make [| 7 |]) [ 4; 5; 1 ] in
+      assert_equal ~printer:float_array_printer
+        (Mlp.forward (mk ()) [| 1.; 2.; 3.; 4. |])
+        (Mlp.forward (mk ()) [| 1.; 2.; 3.; 4. |]) );
+    ( "write then read is exact" >:: fun _ ->
+      let n = Mlp.init (Random.State.make [| 3 |]) [ 4; 5; 5; 2 ] in
+      let n' = round_trip n in
+      assert_equal [ 4; 5; 5; 2 ] (Mlp.sizes n');
+      assert_equal ~printer:float_array_printer
+        (Mlp.forward n [| 0.3; -0.1; 0.9; 0.5 |])
+        (Mlp.forward n' [| 0.3; -0.1; 0.9; 0.5 |]) );
+  ]
+
+(* ---------- Ppo ---------- *)
+
+let half_log_2pi = 0.5 *. log (2. *. Float.pi)
+
+let ppo_world =
+  World.init ~walls:[]
+    ~entities:
+      [
+        mk ~id:0 ~role:Entity.Hider 30. 70.;
+        mk ~id:1 ~role:Entity.Hunter 190. 390.;
+      ]
+
+let float_arrays_eq a b =
+  Array.length a = Array.length b && Array.for_all2 feq a b
+
+let assert_floats expected actual =
+  assert_equal ~cmp:float_arrays_eq ~printer:float_array_printer expected actual
+
+(* the action [ag] samples (seed 0) at a fixed obs, with the given [adv] and
+   [ret] *)
+let one_sample ag ~adv ~ret =
+  let obs = [| 0.1; 0.2; 0.8; 0.9 |] in
+  let act, logp = Ppo.act (Random.State.make [| 0 |]) ag obs in
+  { Ppo.obs; act; logp; adv; ret }
+
+(* [n] updates of [l] on copies of [s] *)
+let rec train_on n l s =
+  if n = 0 then l
+  else train_on (n - 1) (Ppo.update (Random.State.make [| n |]) l (Array.make 8 s)) s
+
+let ppo_tests =
+  [
+    ( "log_prob at the mean, std 1" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float (-2. *. half_log_2pi)
+        (Ppo.log_prob ~mean:[| 1.; 2. |] ~log_std:[| 0.; 0. |] [| 1.; 2. |]) );
+    ( "log_prob one std away, std e" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float
+        (-0.5 -. 1. -. half_log_2pi)
+        (Ppo.log_prob ~mean:[| 0. |] ~log_std:[| 1. |] [| exp 1. |]) );
+    ( "gae with lambda 1 is the discounted return" >:: fun _ ->
+      let adv, ret =
+        Ppo.gae ~gamma:0.5 ~lambda:1. ~rewards:[| 1.; 2.; 4. |]
+          ~values:[| 1.; 1.; 1. |]
+      in
+      (* returns: 4, then 2 + 0.5*4 = 4, then 1 + 0.5*4 = 3 *)
+      assert_floats [| 3.; 4.; 4. |] ret;
+      assert_floats [| 2.; 3.; 3. |] adv );
+    ( "gae with lambda 0 is one-step TD" >:: fun _ ->
+      let adv, ret =
+        Ppo.gae ~gamma:0.5 ~lambda:0. ~rewards:[| 1.; 2. |] ~values:[| 2.; 4. |]
+      in
+      (* delta_0 = 1 + 0.5*4 - 2, delta_1 = 2 + 0 - 4 *)
+      assert_floats [| 1.; -2. |] adv;
+      assert_floats [| 3.; 2. |] ret );
+    ( "gae length mismatch" >:: fun _ ->
+      assert_raises (Invalid_argument "Ppo.gae: length mismatch") (fun () ->
+          Ppo.gae ~gamma:0.9 ~lambda:0.9 ~rewards:[| 1. |] ~values:[||]) );
+    ( "observe: own center then opponent center, scaled" >:: fun _ ->
+      let hider = List.hd (World.entities ppo_world) in
+      assert_floats [| 35. /. 400.; 75. /. 400.; 195. /. 400.; 395. /. 400. |]
+        (Ppo.observe ppo_world hider) );
+    ( "observe: no living opponent uses own center" >:: fun _ ->
+      let hider = List.hd (World.entities ppo_world) in
+      let w =
+        World.with_entities ppo_world
+          (List.map
+             (fun (e : Entity.t) -> if e.role = Hunter then { e with alive = false } else e)
+             (World.entities ppo_world))
+      in
+      assert_floats [| 35. /. 400.; 75. /. 400.; 35. /. 400.; 75. /. 400. |]
+        (Ppo.observe w hider) );
+    ( "act is reproducible from the seed" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 4 |]) in
+      let o = [| 0.1; 0.2; 0.3; 0.4 |] in
+      let a1, l1 = Ppo.act (Random.State.make [| 9 |]) ag o in
+      let a2, l2 = Ppo.act (Random.State.make [| 9 |]) ag o in
+      assert_floats a1 a2;
+      assert_equal ~cmp:feq l1 l2 );
+    ( "update moves value toward the return" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 5 |]) in
+      let s = one_sample ag ~adv:1. ~ret:3. in
+      let before = Float.abs (Ppo.value ag s.obs -. 3.) in
+      let ag' = Ppo.agent (train_on 30 (Ppo.learner ag) s) in
+      let after = Float.abs (Ppo.value ag' s.obs -. 3.) in
+      assert_bool (Printf.sprintf "%f -> %f" before after) (after < before) );
+    ( "update makes a good action more likely" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 5 |]) in
+      let s = one_sample ag ~adv:1. ~ret:0. in
+      (* a lone sample normalizes to advantage 0, so mix in a bad action *)
+      let bad = { s with act = Array.map (fun x -> -.x) s.act; adv = -1. } in
+      let bad = { bad with logp = Ppo.action_log_prob ag bad.obs bad.act } in
+      let l =
+        List.fold_left
+          (fun l i -> Ppo.update (Random.State.make [| i |]) l [| s; bad; s; bad |])
+          (Ppo.learner ag) (List.init 30 Fun.id)
+      in
+      let before = Ppo.action_log_prob ag s.obs s.act in
+      let after = Ppo.action_log_prob (Ppo.agent l) s.obs s.act in
+      assert_bool (Printf.sprintf "%f -> %f" before after) (after > before) );
+    ( "action_log_prob matches act" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 8 |]) in
+      let o = [| 0.4; 0.4; 0.6; 0.1 |] in
+      let a, l = Ppo.act (Random.State.make [| 3 |]) ag o in
+      assert_equal ~cmp:feq ~printer:string_of_float l (Ppo.action_log_prob ag o a) );
+    ( "update with an empty batch changes nothing" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 5 |]) in
+      let ag' = Ppo.agent (Ppo.update (Random.State.make [| 1 |]) (Ppo.learner ag) [||]) in
+      let o = [| 0.5; 0.5; 0.1; 0.1 |] in
+      assert_equal ~cmp:feq (Ppo.value ag o) (Ppo.value ag' o) );
+    ( "write then read is exact" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 6 |]) in
+      let file = Filename.temp_file "ppo" ".txt" in
+      let oc = open_out file in
+      Ppo.write oc ag;
+      close_out oc;
+      let ic = Scanf.Scanning.open_in file in
+      let ag' = Ppo.read ic in
+      Scanf.Scanning.close_in ic;
+      Sys.remove file;
+      let o = [| 0.3; 0.6; 0.2; 0.9 |] in
+      assert_equal ~cmp:feq (Ppo.value ag o) (Ppo.value ag' o);
+      let a, l = Ppo.act (Random.State.make [| 2 |]) ag o in
+      let a', l' = Ppo.act (Random.State.make [| 2 |]) ag' o in
+      assert_floats a a';
+      assert_equal ~cmp:feq l l' );
+  ]
+
+(* ---------- Trainer PPO rounds ---------- *)
+
+let ppo_round ?(time_limit = 2.) ~hider ~hunter () =
+  let ag seed = Some (Ppo.init (Random.State.make [| seed |])) in
+  Trainer.play_ppo (Random.State.make [| 0 |]) ~time_limit
+    ~hider:(if hider then ag 1 else None)
+    ~hunter:(if hunter then ag 2 else None)
+    World.default
+
+let check ~h ~u ~out ~input () =
+  Trainer.check_files ~hider_ppo:h ~hunter_ppo:u ~out ~input
+
+let trainer_ppo_tests =
+  [
+    ( "step_reward is +-dist/arena*dt" >:: fun _ ->
+      (* centers (35, 75) and (195, 395): dist = sqrt (160^2 + 320^2) *)
+      let r = sqrt ((160. ** 2.) +. (320. ** 2.)) /. 400. *. Trainer.dt in
+      assert_equal ~cmp:feq ~printer:string_of_float r
+        (Trainer.step_reward ppo_world Entity.Hider);
+      assert_equal ~cmp:feq ~printer:string_of_float (-.r)
+        (Trainer.step_reward ppo_world Entity.Hunter) );
+    ( "end_reward" >:: fun _ ->
+      assert_equal 1. (Trainer.end_reward Game.Hiders_win Entity.Hider);
+      assert_equal (-1.) (Trainer.end_reward Game.Hiders_win Entity.Hunter);
+      assert_equal 1. (Trainer.end_reward Game.Hunters_win Entity.Hunter);
+      assert_equal (-1.) (Trainer.end_reward Game.Hunters_win Entity.Hider);
+      assert_equal 0. (Trainer.end_reward Game.Ongoing Entity.Hider) );
+    ( "play_ppo both ppo: one sample per step each" >:: fun _ ->
+      let o, secs, ex = ppo_round ~hider:true ~hunter:true () in
+      assert_bool "finished" (o <> Game.Ongoing);
+      let steps = int_of_float (Float.round (secs /. Trainer.dt)) in
+      assert_equal ~printer:string_of_int steps (Array.length ex.hunter);
+      assert_equal ~printer:string_of_int steps (Array.length ex.hider) );
+    ( "play_ppo greedy hunter has no samples" >:: fun _ ->
+      let _, _, ex = ppo_round ~hider:true ~hunter:false () in
+      assert_equal 0 (Array.length ex.hunter);
+      assert_bool "hider has samples" (Array.length ex.hider > 0) );
+    ( "play_ppo greedy hider has no samples" >:: fun _ ->
+      let _, _, ex = ppo_round ~hider:false ~hunter:true () in
+      assert_equal 0 (Array.length ex.hider);
+      assert_bool "hunter has samples" (Array.length ex.hunter > 0) );
+    ( "play_ppo is reproducible" >:: fun _ ->
+      let o1, s1, e1 = ppo_round ~hider:true ~hunter:true () in
+      let o2, s2, e2 = ppo_round ~hider:true ~hunter:true () in
+      assert_equal o1 o2;
+      assert_equal ~cmp:feq s1 s2;
+      assert_floats
+        (Array.map (fun (s : Ppo.sample) -> s.ret) e1.hider)
+        (Array.map (fun (s : Ppo.sample) -> s.ret) e2.hider) );
+    ( "play_ppo rejects two hiders" >:: fun _ ->
+      let w =
+        World.init ~walls:[]
+          ~entities:[ mk ~role:Entity.Hider 0. 0.; mk ~id:1 ~role:Entity.Hider 50. 50. ]
+      in
+      assert_raises
+        (Invalid_argument "Trainer.play_ppo: need exactly one hider and one hunter")
+        (fun () ->
+          Trainer.play_ppo (Random.State.make [| 0 |]) ~time_limit:1. ~hider:None
+            ~hunter:None w) );
+    ( "check_files: neither ppo with --out" >:: fun _ ->
+      assert_raises
+        (Invalid_argument "--out and --in need --hider=ppo or --hunter=ppo")
+        (check ~h:false ~u:false ~out:(Some "f") ~input:None) );
+    ( "check_files: neither ppo with --in" >:: fun _ ->
+      assert_raises
+        (Invalid_argument "--out and --in need --hider=ppo or --hunter=ppo")
+        (check ~h:false ~u:false ~out:None ~input:(Some "f")) );
+    ( "check_files: neither ppo, no files is fine" >:: fun _ ->
+      check ~h:false ~u:false ~out:None ~input:None () );
+    ( "check_files: one ppo side with files is fine" >:: fun _ ->
+      check ~h:false ~u:true ~out:(Some "f") ~input:(Some "g") () );
+  ]
+
+(* ---------- Weights ---------- *)
+
+let with_temp f =
+  let file = Filename.temp_file "weights" ".txt" in
+  Fun.protect ~finally:(fun () -> Sys.remove file) (fun () -> f file)
+
+let same_agent a b =
+  let o = [| 0.2; 0.7; 0.5; 0.1 |] in
+  feq (Ppo.value a o) (Ppo.value b o)
+  && feq (Ppo.action_log_prob a o [| 0.3; -0.4 |]) (Ppo.action_log_prob b o [| 0.3; -0.4 |])
+
+let weights_tests =
+  [
+    ( "save then load, both sides" >:: fun _ ->
+      with_temp (fun file ->
+          let h = Ppo.init (Random.State.make [| 1 |])
+          and u = Ppo.init (Random.State.make [| 2 |]) in
+          Weights.save file { seed = 42; hider = Some h; hunter = Some u };
+          let w = Weights.load file in
+          assert_equal ~printer:string_of_int 42 w.seed;
+          assert_bool "hider" (same_agent h (Option.get w.hider));
+          assert_bool "hunter" (same_agent u (Option.get w.hunter))) );
+    ( "save then load, hunter only" >:: fun _ ->
+      with_temp (fun file ->
+          let u = Ppo.init (Random.State.make [| 2 |]) in
+          Weights.save file { seed = 7; hider = None; hunter = Some u };
+          let w = Weights.load file in
+          assert_equal 7 w.seed;
+          assert_bool "no hider" (w.hider = None);
+          assert_bool "hunter" (same_agent u (Option.get w.hunter))) );
+    ( "load rejects junk" >:: fun _ ->
+      with_temp (fun file ->
+          let oc = open_out file in
+          output_string oc "hello\n";
+          close_out oc;
+          match Weights.load file with
+          | _ -> assert_failure "loaded junk"
+          | exception Failure _ -> ()) );
+    ( "load rejects a cut-off file" >:: fun _ ->
+      with_temp (fun file ->
+          let oc = open_out file in
+          output_string oc "seed 3\nhider\nmlp 4 4 5 5 2\n 0x1p+0";
+          close_out oc;
+          match Weights.load file with
+          | _ -> assert_failure "loaded a cut-off file"
+          | exception Failure _ -> ()) );
+  ]
+
 let suite =
   "hideseek" >::: [ "vec2d" >::: vec2d_tests; "rect" >::: rect_tests; "physics" >::: physics_tests; "game" >::: game_tests;
     "timer" >::: timer_tests; "display" >::: display_tests;
     "world" >::: world_tests; "strategy" >::: strategy_tests;
     "spawn" >::: spawn_tests; "trainer" >::: trainer_tests;
     "greedy_strategy" >::: greedy_strategy_tests;
-    "user_input_strategy" >::: user_input_strategy_tests ]
+    "user_input_strategy" >::: user_input_strategy_tests;
+    "mlp" >::: mlp_tests; "ppo" >::: ppo_tests;
+    "trainer_ppo" >::: trainer_ppo_tests;
+    "weights" >::: weights_tests ]
 
 let () = run_test_tt_main suite
