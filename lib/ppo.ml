@@ -9,9 +9,10 @@ let arena = 400.
 
 (* Discount halflife in game seconds: a reward this far ahead counts half
    as much as one now, 2 halflives a quarter, and so on, whatever the step
-   size. 20 s is one default round, so the timeout win still counts 0.5
-   from the start. Lower it to make the agents care more about the near
-   future. *)
+   size. A hider's return is 1 - 0.5^(seconds survived / halflife) (see
+   [Trainer.survival_reward]), so this is also the survival time that
+   scores 0.5. Lower it to make the agents care more about the near
+   future; keep the round length (--time) well above it. *)
 let halflife = 20.
 
 (* The per-step discount for steps [dt] seconds apart: 0.5^(dt / halflife).
