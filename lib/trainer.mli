@@ -41,8 +41,12 @@ val step_reward : World.t -> Entity.role -> float
     [Hider] and negative for [Hunter].
     Requires: [w] has at least one hider and one hunter. *)
 
+val terminal_value : float
+(** The size of [end_reward] for a finished round. *)
+
 val end_reward : Game.outcome -> Entity.role -> float
-(** [end_reward o r] is [1.] if side [r] won outcome [o], [-1.] if it lost,
+(** [end_reward o r] is [terminal_value] if side [r] won outcome [o],
+    [-. terminal_value] if it lost,
     and [0.] if [o] is [Ongoing]. *)
 
 type experience = { hider : Ppo.sample array; hunter : Ppo.sample array }

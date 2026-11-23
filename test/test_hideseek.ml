@@ -725,10 +725,12 @@ let trainer_ppo_tests =
       assert_equal ~cmp:feq ~printer:string_of_float (-.r)
         (Trainer.step_reward ppo_world Entity.Hunter) );
     ( "end_reward" >:: fun _ ->
-      assert_equal 1. (Trainer.end_reward Game.Hiders_win Entity.Hider);
-      assert_equal (-1.) (Trainer.end_reward Game.Hiders_win Entity.Hunter);
-      assert_equal 1. (Trainer.end_reward Game.Hunters_win Entity.Hunter);
-      assert_equal (-1.) (Trainer.end_reward Game.Hunters_win Entity.Hider);
+      let v = Trainer.terminal_value in
+      assert_bool "positive" (v > 0.);
+      assert_equal v (Trainer.end_reward Game.Hiders_win Entity.Hider);
+      assert_equal (-.v) (Trainer.end_reward Game.Hiders_win Entity.Hunter);
+      assert_equal v (Trainer.end_reward Game.Hunters_win Entity.Hunter);
+      assert_equal (-.v) (Trainer.end_reward Game.Hunters_win Entity.Hider);
       assert_equal 0. (Trainer.end_reward Game.Ongoing Entity.Hider) );
     ( "play_ppo both ppo: one sample per step each" >:: fun _ ->
       let o, secs, ex = ppo_round ~hider:true ~hunter:true () in
