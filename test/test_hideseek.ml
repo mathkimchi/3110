@@ -508,12 +508,81 @@ let user_input_strategy_tests =
       keys_test "other keys ignored" [ Q; Space ] ~x:0. ~y:0.;
     ]
 
+(* ---------- Mlp ---------- *)
+
+let arr2 rows cols xs = Mlp.N.of_array xs [| rows; cols |]
+
+(* 2 -> 2 -> 1 with identity first layer and summing output layer, bias 0.5 *)
+let small_mlp () =
+  Mlp.with_params
+    (Mlp.init (Random.State.make [| 0 |]) [ 2; 2; 1 ])
+    [
+      arr2 2 2 [| 1.; 0.; 0.; 1. |];
+      arr2 1 2 [| 0.; 0. |];
+      arr2 2 1 [| 1.; 1. |];
+      arr2 1 1 [| 0.5 |];
+    ]
+
+(* writes [n] to a temp file and reads it back *)
+let round_trip n =
+  let file = Filename.temp_file "mlp" ".txt" in
+  let oc = open_out file in
+  Mlp.write oc n;
+  close_out oc;
+  let ic = Scanf.Scanning.open_in file in
+  let n' = Mlp.read ic in
+  Scanf.Scanning.close_in ic;
+  Sys.remove file;
+  n'
+
+let float_array_printer a =
+  "[" ^ String.concat "; " (Array.to_list (Array.map string_of_float a)) ^ "]"
+
+let mlp_tests =
+  [
+    ( "init keeps sizes" >:: fun _ ->
+      assert_equal [ 4; 5; 5; 2 ]
+        (Mlp.sizes (Mlp.init (Random.State.make [| 1 |]) [ 4; 5; 5; 2 ])) );
+    ( "forward output length" >:: fun _ ->
+      let n = Mlp.init (Random.State.make [| 1 |]) [ 4; 5; 5; 2 ] in
+      assert_equal 2 (Array.length (Mlp.forward n [| 0.1; 0.2; 0.3; 0.4 |])) );
+    ( "forward: tanh hidden, linear output" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float
+        (tanh 1. +. tanh (-2.) +. 0.5)
+        (Mlp.forward (small_mlp ()) [| 1.; -2. |]).(0) );
+    ( "forward wrong input length" >:: fun _ ->
+      assert_raises (Invalid_argument "Mlp.forward: input has the wrong length")
+        (fun () -> Mlp.forward (small_mlp ()) [| 1. |]) );
+    ( "init rejects one layer" >:: fun _ ->
+      assert_raises
+        (Invalid_argument "Mlp.init: need at least two positive layer widths")
+        (fun () -> Mlp.init (Random.State.make [| 1 |]) [ 4 ]) );
+    ( "with_params rejects a bad shape" >:: fun _ ->
+      assert_raises (Invalid_argument "Mlp.with_params: shape mismatch")
+        (fun () ->
+          Mlp.with_params (small_mlp ())
+            [ arr2 1 2 [| 1.; 1. |]; arr2 1 2 [| 0.; 0. |]; arr2 2 1 [| 1.; 1. |]; arr2 1 1 [| 0. |] ]) );
+    ( "same seed, same network" >:: fun _ ->
+      let mk () = Mlp.init (Random.State.make [| 7 |]) [ 4; 5; 1 ] in
+      assert_equal ~printer:float_array_printer
+        (Mlp.forward (mk ()) [| 1.; 2.; 3.; 4. |])
+        (Mlp.forward (mk ()) [| 1.; 2.; 3.; 4. |]) );
+    ( "write then read is exact" >:: fun _ ->
+      let n = Mlp.init (Random.State.make [| 3 |]) [ 4; 5; 5; 2 ] in
+      let n' = round_trip n in
+      assert_equal [ 4; 5; 5; 2 ] (Mlp.sizes n');
+      assert_equal ~printer:float_array_printer
+        (Mlp.forward n [| 0.3; -0.1; 0.9; 0.5 |])
+        (Mlp.forward n' [| 0.3; -0.1; 0.9; 0.5 |]) );
+  ]
+
 let suite =
   "hideseek" >::: [ "vec2d" >::: vec2d_tests; "rect" >::: rect_tests; "physics" >::: physics_tests; "game" >::: game_tests;
     "timer" >::: timer_tests; "display" >::: display_tests;
     "world" >::: world_tests; "strategy" >::: strategy_tests;
     "spawn" >::: spawn_tests; "trainer" >::: trainer_tests;
     "greedy_strategy" >::: greedy_strategy_tests;
-    "user_input_strategy" >::: user_input_strategy_tests ]
+    "user_input_strategy" >::: user_input_strategy_tests;
+    "mlp" >::: mlp_tests ]
 
 let () = run_test_tt_main suite
