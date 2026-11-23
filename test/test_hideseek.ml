@@ -332,6 +332,69 @@ let strategy_tests =
       assert_equal ~cmp:feq ~printer:string_of_float ~msg:"y" 0. dir.y );
   ]
 
+(* ---------- Spawn ---------- *)
+
+let positions w = List.map (fun (e : Entity.t) -> (e.pos.x, e.pos.y)) (World.entities w)
+let spawn seed = Spawn.randomize (Random.State.make [| seed |]) World.default
+let seeds = List.init 200 Fun.id
+
+(* [for_all_spawns f] checks [f] on the default world spawned from many seeds *)
+let for_all_spawns f = List.iter (fun seed -> f seed (spawn seed)) seeds
+
+let center (e : Entity.t) = Rect.center (Entity.hitbox e)
+
+let spawn_tests =
+  [
+    ( "same seed gives the same positions" >:: fun _ ->
+      assert_equal (positions (spawn 7)) (positions (spawn 7)) );
+    ( "different seeds give different positions" >:: fun _ ->
+      assert_bool "positions differ" (positions (spawn 1) <> positions (spawn 2)) );
+    ( "keeps every field but pos, in order" >:: fun _ ->
+      let strip (e : Entity.t) = { e with pos = Vec2d.zero } in
+      assert_equal
+        (List.map strip (World.entities World.default))
+        (List.map strip (World.entities (spawn 3))) );
+    ( "keeps the walls" >:: fun _ ->
+      assert_equal (World.walls World.default) (World.walls (spawn 3)) );
+    ( "nobody spawns in a wall" >:: fun _ ->
+      for_all_spawns (fun seed w ->
+          List.iter
+            (fun e ->
+              List.iter
+                (fun wall ->
+                  assert_bool (Printf.sprintf "seed %d" seed)
+                    (not (Rect.overlaps wall (Entity.hitbox e))))
+                (World.walls w))
+            (World.entities w)) );
+    ( "everyone spawns inside the arena" >:: fun _ ->
+      for_all_spawns (fun seed w ->
+          List.iter
+            (fun (e : Entity.t) ->
+              assert_bool (Printf.sprintf "seed %d" seed)
+                (e.pos.x >= 0. && e.pos.y >= 0.
+                && e.pos.x +. e.size <= 400. && e.pos.y +. e.size <= 400.))
+            (World.entities w)) );
+    ( "players spawn at least min_gap apart" >:: fun _ ->
+      for_all_spawns (fun seed w ->
+          match World.entities w with
+          | [ a; b ] ->
+              assert_bool (Printf.sprintf "seed %d" seed)
+                (Vec2d.dist (center a) (center b) >= 100.)
+          | _ -> assert_failure "expected two entities") );
+    ( "custom min_gap is respected" >:: fun _ ->
+      List.iter
+        (fun seed ->
+          let w = Spawn.randomize ~min_gap:250. (Random.State.make [| seed |]) World.default in
+          match World.entities w with
+          | [ a; b ] -> assert_bool "gap" (Vec2d.dist (center a) (center b) >= 250.)
+          | _ -> assert_failure "expected two entities")
+        seeds );
+    ( "impossible gap raises Failure" >:: fun _ ->
+      match Spawn.randomize ~min_gap:10_000. (Random.State.make [| 0 |]) World.default with
+      | _ -> assert_failure "expected Failure"
+      | exception Failure _ -> () );
+  ]
+
 (* ---------- Greedy_strategy ---------- *)
 
 (* directions may have any length, so compare them normalized *)
@@ -409,6 +472,7 @@ let suite =
   "hideseek" >::: [ "vec2d" >::: vec2d_tests; "rect" >::: rect_tests; "physics" >::: physics_tests; "game" >::: game_tests;
     "timer" >::: timer_tests; "display" >::: display_tests;
     "world" >::: world_tests; "strategy" >::: strategy_tests;
+    "spawn" >::: spawn_tests;
     "greedy_strategy" >::: greedy_strategy_tests;
     "user_input_strategy" >::: user_input_strategy_tests ]
 
