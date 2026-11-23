@@ -3,8 +3,9 @@
     position is. Both are [Mlp]s of widths 4-5-5-2 (policy) and 4-5-5-1
     (value), as in issue #29.
 
-    Hyperparameters: discount halflife 20 s, GAE lambda 0.95, clip 0.2, Adam with
-    learning rate 3e-4, 4 epochs of minibatches of 256 per update. *)
+    Hyperparameters: discount halflife 20 s, GAE lambda halflife 0.7 s,
+    clip 0.2, Adam with learning rate 3e-4, 4 epochs of minibatches of 256
+    per update. *)
 
 val arena : float
 (** [400.], the size of [World.default]; positions are divided by it so the
@@ -18,8 +19,12 @@ val gamma : dt:float -> float
     to [gae] for steps [dt] game seconds apart, so a reward [halflife]
     seconds ahead counts half whatever [dt] is. *)
 
-val lambda : float
-(** [0.95], the GAE lambda to pass to [gae]. *)
+val lambda_halflife : float
+(** [0.7], the GAE lambda halflife in game seconds. *)
+
+val lambda : dt:float -> float
+(** [lambda ~dt] is [0.5 ** (dt /. lambda_halflife)], the GAE lambda to pass
+    to [gae] for steps [dt] game seconds apart. *)
 
 type agent
 (** A policy network, a value network and a log standard deviation per

@@ -637,6 +637,13 @@ let ppo_tests =
       assert_equal ~cmp:feq ~printer:string_of_float
         (Ppo.gamma ~dt:0.05 ** 60.)
         (Ppo.gamma ~dt:0.001 ** 3000.) );
+    ( "lambda halves the weight over its halflife" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float 0.5
+        (Ppo.lambda ~dt:Ppo.lambda_halflife) );
+    ( "lambda does not depend on the step size" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float
+        (Ppo.lambda ~dt:0.05 ** 20.)
+        (Ppo.lambda ~dt:0.001 ** 1000.) );
     ( "gae length mismatch" >:: fun _ ->
       assert_raises (Invalid_argument "Ppo.gae: length mismatch") (fun () ->
           Ppo.gae ~gamma:0.9 ~lambda:0.9 ~rewards:[| 1. |] ~values:[||]) );

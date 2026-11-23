@@ -21,7 +21,14 @@ let gamma ~dt = 0.5 ** (dt /. halflife)
 (* GAE lambda: how far advantages look ahead before trusting the value
    network. 0 = one-step TD (low variance, biased by a bad critic); 1 = full
    Monte Carlo return (unbiased, noisy). 0.95 is the usual middle. *)
-let lambda = 0.95
+(* Set as a halflife in game seconds, like [halflife]: after this long, the
+   advantage leans half on the rewards seen and half on the value network.
+   0.7 s gives lambda of about 0.95 at [Trainer.dt] = 0.05. Raising it to
+   [halflife] (lambda about 0.998) would almost turn off what GAE does. *)
+let lambda_halflife = 0.7
+
+(* The per-step GAE lambda for steps [dt] seconds apart. *)
+let lambda ~dt = 0.5 ** (dt /. lambda_halflife)
 
 (* PPO clip range. In one update the new/old action probability ratio only
    counts inside [1 - clip, 1 + clip], so the policy cannot move too far

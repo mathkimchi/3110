@@ -1,6 +1,6 @@
-(* Game seconds per step, so 20 decisions per second. The discount is set
-   in seconds ([Ppo.halflife]), so changing dt does not change how far
-   ahead the agents look; [Ppo.lambda] is still per step, though. *)
+(* Game seconds per step, so 20 decisions per second. The discount and GAE
+   lambda are set in seconds ([Ppo.halflife], [Ppo.lambda_halflife]), so
+   changing dt does not change how far ahead the agents look. *)
 let dt = 1. /. 20.
 
 let play g =
@@ -84,7 +84,7 @@ let recorder rng ag log : (module Strategy.S) =
 let samples log =
   let steps = Array.of_list (List.rev log.steps) in
   let adv, ret =
-    Ppo.gae ~gamma:(Ppo.gamma ~dt) ~lambda:Ppo.lambda
+    Ppo.gae ~gamma:(Ppo.gamma ~dt) ~lambda:(Ppo.lambda ~dt)
       ~rewards:(Array.map (fun s -> s.reward) steps)
       ~values:(Array.map (fun s -> s.value) steps)
   in
