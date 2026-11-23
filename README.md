@@ -22,9 +22,13 @@ To run the trainer, run:
 
 ```sh
 dune exec bin/train.exe
-# default rounds is 100
-dune exec bin/train.exe -- --rounds=100 --time=30 --seed=1
+# default rounds is 100, default --time is 100 seconds per round
+dune exec bin/train.exe -- --rounds=100 --time=100 --seed=1
 ```
+
+The hider is rewarded for every step it stays alive, so its return is
+`1 - 0.5^(seconds survived / 20)`. After each update the trainer prints the
+average survival time of the batch and each network's losses.
 
 By default both sides are trained with PPO (needs `opam install owl-base`).
 Pick who plays each side, how often the networks update, and where to save
