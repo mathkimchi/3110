@@ -20,8 +20,8 @@ let gamma ~dt = 0.5 ** (dt /. halflife)
 
 (* GAE lambda: how far advantages look ahead before trusting the value
    network. 0 = one-step TD (low variance, biased by a bad critic); 1 = full
-   Monte Carlo return (unbiased, noisy). 0.95 is the usual middle. *)
-(* Set as a halflife in game seconds, like [halflife]: after this long, the
+   Monte Carlo return (unbiased, noisy); 0.95 is the usual middle.
+   Set as a halflife in game seconds, like [halflife]: after this long, the
    advantage leans half on the rewards seen and half on the value network.
    0.7 s gives lambda of about 0.95 at [Trainer.dt] = 0.05. Raising it to
    [halflife] (lambda about 0.998) would almost turn off what GAE does. *)
