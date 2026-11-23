@@ -37,7 +37,7 @@ let () =
   (* a fixed-size window (min = max size) never shows up under some tiling
      compositors via xwayland-satellite; resizable windows do *)
   Raylib.set_config_flags Raylib.ConfigFlags.window_resizable;
-  Raylib.init_window 400 400 "hideseek";
+    Raylib.init_window 662 540 "hideseek";
   Raylib.set_target_fps 60;
   (* Raylib quits on Esc by default; Q matches the old terminal prototype *)
   Raylib.set_exit_key Raylib.Key.Q;
