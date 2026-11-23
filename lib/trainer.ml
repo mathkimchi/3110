@@ -78,7 +78,7 @@ let samples log =
       { Ppo.obs = s.obs; act = s.act; logp = s.logp; adv = adv.(i); ret = ret.(i) })
     steps
 
-let play_ppo rng ~time_limit ~hider ~hunter w =
+let play_ppo ?(on_step = fun _ _ -> ()) rng ~time_limit ~hider ~hunter w =
   if List.length (World.hiders w) <> 1 || List.length (World.hunters w) <> 1
   then invalid_arg "Trainer.play_ppo: need exactly one hider and one hunter";
   let side agent =
@@ -111,6 +111,7 @@ let play_ppo rng ~time_limit ~hider ~hunter w =
     in
     credit hider_log Entity.Hider (fst before);
     credit hunter_log Entity.Hunter (snd before);
+    on_step g o;
     if o = Game.Ongoing then go g else (o, start -. Game.time_left g)
   in
   let o, secs = go g in

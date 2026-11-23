@@ -40,6 +40,16 @@ dune exec bin/train.exe -- --in=nn.txt --out=nn.txt
 Without `--out` nothing is saved. The file holds the seed and the networks of
 the sides that were PPO. `--out` and `--in` need at least one PPO side.
 
+The trainer shows each round in a window. `--speed` sets how many game
+seconds pass per real second (default 1); `--speed=0` or `--speed=inf` runs
+as fast as possible. Closing the window (or pressing Q) quits right away
+without saving.
+
+```sh
+dune exec bin/train.exe -- --speed=5
+dune exec bin/train.exe -- --speed=inf --rounds=1000 --out=nn.txt
+```
+
 On wayland, you might need to run:
 
 ```sh
