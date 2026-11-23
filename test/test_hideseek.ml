@@ -630,6 +630,13 @@ let ppo_tests =
       (* delta_0 = 1 + 0.5*4 - 2, delta_1 = 2 + 0 - 4 *)
       assert_floats [| 1.; -2. |] adv;
       assert_floats [| 3.; 2. |] ret );
+    ( "gamma halves the weight over one halflife" >:: fun _ ->
+      assert_equal ~cmp:feq ~printer:string_of_float 0.5 (Ppo.gamma ~dt:Ppo.halflife) );
+    ( "gamma does not depend on the step size" >:: fun _ ->
+      (* 3 s ahead counts the same at 20 or 1000 steps per second *)
+      assert_equal ~cmp:feq ~printer:string_of_float
+        (Ppo.gamma ~dt:0.05 ** 60.)
+        (Ppo.gamma ~dt:0.001 ** 3000.) );
     ( "gae length mismatch" >:: fun _ ->
       assert_raises (Invalid_argument "Ppo.gae: length mismatch") (fun () ->
           Ppo.gae ~gamma:0.9 ~lambda:0.9 ~rewards:[| 1. |] ~values:[||]) );

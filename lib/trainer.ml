@@ -1,5 +1,6 @@
-(* Game seconds per step, so 20 decisions per second. Also the unit [gamma]
-   discounts by: changing dt changes how many seconds gamma looks ahead. *)
+(* Game seconds per step, so 20 decisions per second. The discount is set
+   in seconds ([Ppo.halflife]), so changing dt does not change how far
+   ahead the agents look; [Ppo.lambda] is still per step, though. *)
 let dt = 1. /. 20.
 
 let play g =
@@ -34,10 +35,10 @@ let center e = Rect.center (Entity.hitbox e)
 (* Reward shaping each step: the hider gets distance / arena * dt, the
    hunter the negative. Per game second that is distance / arena, e.g. 0.5
    at 200 px apart (up to about 1.4 on the diagonal), so a 20 s round sums
-   to about 10, or about 2.5 discounted (about 100 steps of horizon). With
-   [terminal_value] at 1 that outweighs winning and the agents mostly learn
-   "keep distance" / "close distance"; a bigger [terminal_value] makes the
-   outcome dominate. *)
+   to about 10, or about 7 discounted from the start ([Ppo.halflife] 20 s).
+   With [terminal_value] at 1 that outweighs winning and the agents mostly
+   learn "keep distance" / "close distance"; a bigger [terminal_value] makes
+   the outcome dominate. *)
 let step_reward w (role : Entity.role) =
   let d =
     Vec2d.dist (center (List.hd (World.hiders w))) (center (List.hd (World.hunters w)))
@@ -83,7 +84,7 @@ let recorder rng ag log : (module Strategy.S) =
 let samples log =
   let steps = Array.of_list (List.rev log.steps) in
   let adv, ret =
-    Ppo.gae ~gamma:Ppo.gamma ~lambda:Ppo.lambda
+    Ppo.gae ~gamma:(Ppo.gamma ~dt) ~lambda:Ppo.lambda
       ~rewards:(Array.map (fun s -> s.reward) steps)
       ~values:(Array.map (fun s -> s.value) steps)
   in

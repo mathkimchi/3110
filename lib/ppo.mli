@@ -3,16 +3,20 @@
     position is. Both are [Mlp]s of widths 4-5-5-2 (policy) and 4-5-5-1
     (value), as in issue #29.
 
-    Hyperparameters: discount 0.99, GAE lambda 0.95, clip 0.2, Adam with
+    Hyperparameters: discount halflife 20 s, GAE lambda 0.95, clip 0.2, Adam with
     learning rate 3e-4, 4 epochs of minibatches of 256 per update. *)
 
 val arena : float
 (** [400.], the size of [World.default]; positions are divided by it so the
     networks see numbers around [0., 1.]. *)
 
-val gamma : float
-(** [0.99], the discount per step that [update]'s caller should pass to
-    [gae]. *)
+val halflife : float
+(** [20.], the discount halflife in game seconds. *)
+
+val gamma : dt:float -> float
+(** [gamma ~dt] is [0.5 ** (dt /. halflife)], the per-step discount to pass
+    to [gae] for steps [dt] game seconds apart, so a reward [halflife]
+    seconds ahead counts half whatever [dt] is. *)
 
 val lambda : float
 (** [0.95], the GAE lambda to pass to [gae]. *)

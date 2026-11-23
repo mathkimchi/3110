@@ -51,7 +51,7 @@ val end_reward : Game.outcome -> Entity.role -> float
 
 type experience = { hider : Ppo.sample array; hunter : Ppo.sample array }
 (** The steps each PPO side took in a round, in order, with advantages and
-    returns from [Ppo.gae ~gamma:Ppo.gamma ~lambda:Ppo.lambda]. A side
+    returns from [Ppo.gae ~gamma:(Ppo.gamma ~dt) ~lambda:Ppo.lambda]. A side
     played by [Greedy_strategy] has no samples. *)
 
 val play_ppo :

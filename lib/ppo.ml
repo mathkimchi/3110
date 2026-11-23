@@ -7,12 +7,16 @@ module AD = Mlp.AD
    networks get inputs around 0..1. *)
 let arena = 400.
 
-(* Discount per step. A reward k steps ahead counts gamma^k as much as one
-   now. Steps are [Trainer.dt] = 1/20 s apart, so the effective horizon is
-   about 1 / (1 - gamma) = 100 steps = 5 game seconds. Raise toward 1 (e.g.
-   0.995 is about 10 s, 0.999 about 50 s) to make later events like the
-   timeout win matter more. *)
-let gamma = 0.99
+(* Discount halflife in game seconds: a reward this far ahead counts half
+   as much as one now, 2 halflives a quarter, and so on, whatever the step
+   size. 20 s is one default round, so the timeout win still counts 0.5
+   from the start. Lower it to make the agents care more about the near
+   future. *)
+let halflife = 20.
+
+(* The per-step discount for steps [dt] seconds apart: 0.5^(dt / halflife).
+   At [Trainer.dt] = 0.05 that is about 0.9983. *)
+let gamma ~dt = 0.5 ** (dt /. halflife)
 
 (* GAE lambda: how far advantages look ahead before trusting the value
    network. 0 = one-step TD (low variance, biased by a bad critic); 1 = full
