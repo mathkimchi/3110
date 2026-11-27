@@ -3,8 +3,10 @@ module AD = Mlp.AD
 
 (* ---------- hyperparameters ---------- *)
 
-(* Width of [World.default] in pixels. Positions are divided by this so the
-   networks get inputs around 0..1. *)
+(* Width of [World.default] in pixels. Positions are measured from the
+   middle of the arena and divided by this, so the networks get inputs in
+   -0.5..0.5 and mirroring the map in x or y is just negating that
+   coordinate (see [flips]). *)
 let arena = 400.
 
 (* Discount halflife in game seconds: a reward this far ahead counts half
@@ -94,7 +96,8 @@ let observe w (e : Entity.t) =
       None opponents
     |> Option.value ~default:me
   in
-  Array.map (fun v -> v /. arena) [| me.x; me.y; other.x; other.y |]
+  let mid = arena /. 2. in
+  Array.map (fun v -> (v -. mid) /. arena) [| me.x; me.y; other.x; other.y |]
 
 let log_prob ~mean ~log_std a =
   let total = ref 0. in

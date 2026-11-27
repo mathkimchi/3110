@@ -8,8 +8,9 @@
     per update. *)
 
 val arena : float
-(** [400.], the size of [World.default]; positions are divided by it so the
-    networks see numbers around [0., 1.]. *)
+(** [400.], the size of [World.default]; positions are measured from the
+    middle of the arena and divided by it so the networks see numbers in
+    [-0.5, 0.5]. *)
 
 val halflife : float
 (** [20.], the discount halflife in game seconds. *)
@@ -42,7 +43,8 @@ val init : Random.State.t -> agent
 
 val observe : World.t -> Entity.t -> float array
 (** [observe w e] is [[| x; y; ox; oy |]]: the center of [e] and the center
-    of the closest living entity of the other role, each divided by
+    of the closest living entity of the other role, each measured from the
+    middle of the arena ([(arena /. 2., arena /. 2.)]) and divided by
     [arena]. If there is no such entity, [(ox, oy)] is [e]'s own center. *)
 
 val log_prob : mean:float array -> log_std:float array -> float array -> float

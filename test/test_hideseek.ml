@@ -655,9 +655,9 @@ let ppo_tests =
     ( "gae length mismatch" >:: fun _ ->
       assert_raises (Invalid_argument "Ppo.gae: length mismatch") (fun () ->
           Ppo.gae ~gamma:0.9 ~lambda:0.9 ~rewards:[| 1. |] ~values:[||] ()) );
-    ( "observe: own center then opponent center, scaled" >:: fun _ ->
+    ( "observe: own center then opponent center, from the middle, scaled" >:: fun _ ->
       let hider = List.hd (World.entities ppo_world) in
-      assert_floats [| 35. /. 400.; 75. /. 400.; 195. /. 400.; 395. /. 400. |]
+      assert_floats [| -165. /. 400.; -125. /. 400.; -5. /. 400.; 195. /. 400. |]
         (Ppo.observe ppo_world hider) );
     ( "observe: no living opponent uses own center" >:: fun _ ->
       let hider = List.hd (World.entities ppo_world) in
@@ -667,7 +667,7 @@ let ppo_tests =
              (fun (e : Entity.t) -> if e.role = Hunter then { e with alive = false } else e)
              (World.entities ppo_world))
       in
-      assert_floats [| 35. /. 400.; 75. /. 400.; 35. /. 400.; 75. /. 400. |]
+      assert_floats [| -165. /. 400.; -125. /. 400.; -165. /. 400.; -125. /. 400. |]
         (Ppo.observe w hider) );
     ( "act is reproducible from the seed" >:: fun _ ->
       let ag = Ppo.init (Random.State.make [| 4 |]) in
