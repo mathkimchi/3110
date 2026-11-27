@@ -5,7 +5,7 @@
 
     Hyperparameters: discount halflife 20 s, GAE lambda halflife 5 s,
     clip 0.2, Adam with learning rate 3e-3, 4 epochs of minibatches of 256
-    per update. *)
+    per update, symmetry penalty weight 1. *)
 
 val arena : float
 (** [400.], the size of [World.default]; positions are measured from the
@@ -26,6 +26,30 @@ val lambda_halflife : float
 val lambda : dt:float -> float
 (** [lambda ~dt] is [0.5 ** (dt /. lambda_halflife)], the GAE lambda to pass
     to [gae] for steps [dt] game seconds apart. *)
+
+val symmetry_coef : float
+(** [1.], the weight of the symmetry penalty [update] adds to each loss
+    (see [symmetry_loss]). *)
+
+(** {2 Symmetry}
+
+    The map looks the same mirrored left-right or top-bottom, and
+    observations are measured from its middle, so mirroring a position
+    negates some coordinates. *)
+
+val flips : (float * float) list
+(** [flips] is the three mirrorings other than doing nothing, as the signs
+    [(sx, sy)] they multiply x and y by: [(-1., 1.)] (left-right),
+    [(1., -1.)] (top-bottom) and [(-1., -1.)] (both). *)
+
+val flip_obs : float * float -> float array -> float array
+(** [flip_obs (sx, sy) o] is observation [o] (see [observe]) of the mirrored
+    position: both x coordinates times [sx], both y coordinates times [sy].
+    Requires: [o] has 4 entries. *)
+
+val flip_act : float * float -> float array -> float array
+(** [flip_act (sx, sy) a] is the move [a] mirrored: [[| sx *. a.(0); sy *. a.(1) |]].
+    Requires: [a] has 2 entries. *)
 
 type agent
 (** A policy network, a value network and a log standard deviation per
@@ -51,6 +75,10 @@ val log_prob : mean:float array -> log_std:float array -> float array -> float
 (** [log_prob ~mean ~log_std a] is the log density of [a] under independent
     Gaussians with means [mean] and standard deviations [exp log_std].
     Requires: all three arrays have the same length. *)
+
+val mean : agent -> float array -> float array
+(** [mean ag o] is the mean of the direction [ag]'s policy picks at
+    observation [o]: [Mlp.forward] of its policy network. *)
 
 val action_log_prob : agent -> float array -> float array -> float
 (** [action_log_prob ag o a] is the log probability density of [ag]'s policy
@@ -104,15 +132,25 @@ val update : Random.State.t -> learner -> sample array -> learner
     normalized, then for each epoch the samples are shuffled with [rng] and
     split into minibatches, and each minibatch takes one Adam step on the
     clipped policy loss (policy and [log_std]) and one on the squared error
-    of the value network. [l] unchanged if [samples] is empty. *)
+    of the value network, each plus [symmetry_coef] times its part of
+    [symmetry_loss]. [l] unchanged if [samples] is empty. *)
 
 val losses : learner -> sample array -> float * float
 (** [losses l samples] is [(policy, value)]: the clipped policy loss and the
-    value network's mean squared error that [update] minimizes, for [l]'s
+    value network's mean squared error that [update] minimizes (without the
+    symmetry penalty), for [l]'s
     current networks on all of [samples] (advantages normalized as in
     [update]). A value loss that stays high while the policy loss settles
     hints that the value network is too small for the returns.
     [(nan, nan)] if [samples] is empty. *)
+
+val symmetry_loss : learner -> sample array -> float * float
+(** [symmetry_loss l samples] is [(policy, value)]: how far [l]'s networks
+    are from mirror-symmetric at the observations of [samples]. For the
+    policy it is the mean, over [flips] [g], samples [o] and both move
+    components, of the square of [mean (flip_obs g o) - flip_act g (mean o)];
+    for the value, of [value (flip_obs g o) - value o]. [0.] for networks
+    that are exactly symmetric. [(nan, nan)] if [samples] is empty. *)
 
 val write : out_channel -> agent -> unit
 (** [write oc ag] writes [ag]'s networks and [log_std] to [oc] as text. *)
