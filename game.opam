@@ -13,7 +13,6 @@ depends: [
   "dune" {>= "3.0"}
   "ocaml"
   "raylib"
-  "owl-base"
   "odoc" {with-doc}
 ]
 build: [

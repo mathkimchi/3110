@@ -510,18 +510,11 @@ let user_input_strategy_tests =
 
 (* ---------- Mlp ---------- *)
 
-let arr2 rows cols xs = Mlp.N.of_array xs [| rows; cols |]
-
 (* 2 -> 2 -> 1 with identity first layer and summing output layer, bias 0.5 *)
 let small_mlp () =
   Mlp.with_params
     (Mlp.init (Random.State.make [| 0 |]) [ 2; 2; 1 ])
-    [
-      arr2 2 2 [| 1.; 0.; 0.; 1. |];
-      arr2 1 2 [| 0.; 0. |];
-      arr2 2 1 [| 1.; 1. |];
-      arr2 1 1 [| 0.5 |];
-    ]
+    [ [| 1.; 0.; 0.; 1. |]; [| 0.; 0. |]; [| 1.; 1. |]; [| 0.5 |] ]
 
 (* writes [n] to a temp file and reads it back *)
 let round_trip n =
@@ -561,7 +554,7 @@ let mlp_tests =
       assert_raises (Invalid_argument "Mlp.with_params: shape mismatch")
         (fun () ->
           Mlp.with_params (small_mlp ())
-            [ arr2 1 2 [| 1.; 1. |]; arr2 1 2 [| 0.; 0. |]; arr2 2 1 [| 1.; 1. |]; arr2 1 1 [| 0. |] ]) );
+            [ [| 1.; 1. |]; [| 0.; 0. |]; [| 1.; 1. |]; [| 0. |] ]) );
     ( "same seed, same network" >:: fun _ ->
       let mk () = Mlp.init (Random.State.make [| 7 |]) [ 4; 5; 1 ] in
       assert_equal ~printer:float_array_printer
@@ -601,10 +594,36 @@ let one_sample ag ~adv ~ret =
   let act, logp = Ppo.act (Random.State.make [| 0 |]) ag obs in
   { Ppo.obs; act; logp; adv; ret }
 
+(* The PyTorch backend, started once for the whole suite. [None] if it
+   cannot start (no uv or no torch); the tests that need it are then
+   skipped, so the rest of the suite still runs without Python. *)
+let backend =
+  lazy
+    (try Some (Torch_backend.start ~script:"../python/ppo_torch.py" ())
+     with Failure m ->
+       prerr_endline ("skipping the PyTorch tests: " ^ m);
+       None)
+
+(* [torch name f] is a test that runs [f] on the backend, skipped without it *)
+let torch name f =
+  name >:: fun _ ->
+  match Lazy.force backend with
+  | Some b -> f b
+  | None -> skip_if true "no PyTorch backend"
+
 (* [n] updates of [l] on copies of [s] *)
-let rec train_on n l s =
+let rec train_on b n l s =
   if n = 0 then l
-  else train_on (n - 1) (Ppo.update (Random.State.make [| n |]) l (Array.make 8 s)) s
+  else train_on b (n - 1) (Ppo.update b (Random.State.make [| n |]) l (Array.make 8 s)) s
+
+(* 600 fixed samples of made-up experience for agent [ag] *)
+let fixed_samples ag =
+  let r = Random.State.make [| 11 |] in
+  let f () = Random.State.float r 1. -. 0.5 in
+  Array.init 600 (fun _ ->
+      let obs = Array.init 4 (fun _ -> f ()) in
+      let act, logp = Ppo.act r ag obs in
+      { Ppo.obs; act; logp; adv = 3. *. f (); ret = f () +. 0.5 })
 
 let ppo_tests =
   [
@@ -676,14 +695,14 @@ let ppo_tests =
       let a2, l2 = Ppo.act (Random.State.make [| 9 |]) ag o in
       assert_floats a1 a2;
       assert_equal ~cmp:feq l1 l2 );
-    ( "update moves value toward the return" >:: fun _ ->
+    torch "update moves value toward the return" (fun b ->
       let ag = Ppo.init (Random.State.make [| 5 |]) in
       let s = one_sample ag ~adv:1. ~ret:3. in
       let before = Float.abs (Ppo.value ag s.obs -. 3.) in
-      let ag' = Ppo.agent (train_on 30 (Ppo.learner ag) s) in
+      let ag' = Ppo.agent (train_on b 30 (Ppo.learner ag) s) in
       let after = Float.abs (Ppo.value ag' s.obs -. 3.) in
       assert_bool (Printf.sprintf "%f -> %f" before after) (after < before) );
-    ( "update makes a good action more likely" >:: fun _ ->
+    torch "update makes a good action more likely" (fun b ->
       let ag = Ppo.init (Random.State.make [| 5 |]) in
       let s = one_sample ag ~adv:1. ~ret:0. in
       (* a lone sample normalizes to advantage 0, so mix in a bad action *)
@@ -691,7 +710,7 @@ let ppo_tests =
       let bad = { bad with logp = Ppo.action_log_prob ag bad.obs bad.act } in
       let l =
         List.fold_left
-          (fun l i -> Ppo.update (Random.State.make [| i |]) l [| s; bad; s; bad |])
+          (fun l i -> Ppo.update b (Random.State.make [| i |]) l [| s; bad; s; bad |])
           (Ppo.learner ag) (List.init 30 Fun.id)
       in
       let before = Ppo.action_log_prob ag s.obs s.act in
@@ -756,22 +775,52 @@ let ppo_tests =
     ( "symmetry_loss of an empty batch is nan" >:: fun _ ->
       let p, v = Ppo.symmetry_loss (Ppo.learner (Ppo.init (Random.State.make [| 5 |]))) [||] in
       assert_bool "nan" (Float.is_nan p && Float.is_nan v) );
-    ( "update makes the networks more symmetric" >:: fun _ ->
+    torch "update makes the networks more symmetric" (fun b ->
       let ag = Ppo.init (Random.State.make [| 5 |]) in
       let s = one_sample ag ~adv:1. ~ret:3. in
       let batch = [| s |] in
       let p0, v0 = Ppo.symmetry_loss (Ppo.learner ag) batch in
-      let p1, v1 = Ppo.symmetry_loss (train_on 30 (Ppo.learner ag) s) batch in
+      let p1, v1 = Ppo.symmetry_loss (train_on b 30 (Ppo.learner ag) s) batch in
       assert_bool (Printf.sprintf "policy %f -> %f" p0 p1) (p1 < p0);
       assert_bool (Printf.sprintf "value %f -> %f" v0 v1) (v1 < v0) );
     ( "losses of an empty batch are nan" >:: fun _ ->
       let p, v = Ppo.losses (Ppo.learner (Ppo.init (Random.State.make [| 5 |]))) [||] in
       assert_bool "nan" (Float.is_nan p && Float.is_nan v) );
-    ( "update with an empty batch changes nothing" >:: fun _ ->
+    torch "update with an empty batch changes nothing" (fun b ->
       let ag = Ppo.init (Random.State.make [| 5 |]) in
-      let ag' = Ppo.agent (Ppo.update (Random.State.make [| 1 |]) (Ppo.learner ag) [||]) in
+      let ag' = Ppo.agent (Ppo.update b (Random.State.make [| 1 |]) (Ppo.learner ag) [||]) in
       let o = [| 0.5; 0.5; 0.1; 0.1 |] in
       assert_equal ~cmp:feq (Ppo.value ag o) (Ppo.value ag' o) );
+    torch "PyTorch losses match the OCaml ones" (fun b ->
+      let ag = Ppo.init (Random.State.make [| 5 |]) in
+      let s = fixed_samples ag in
+      (* move away from the data-collecting policy so the ratio is not 1 *)
+      let l = Ppo.update b (Random.State.make [| 3 |]) (Ppo.learner ag) s in
+      let (p, v), (sp, sv) = Ppo.torch_losses b l s in
+      let p', v' = Ppo.losses l s and sp', sv' = Ppo.symmetry_loss l s in
+      List.iter
+        (fun (name, want, got) ->
+          assert_equal ~msg:name ~cmp:feq ~printer:string_of_float want got)
+        [ ("policy", p', p); ("value", v', v); ("policy asym", sp', sp); ("value asym", sv', sv) ] );
+    torch "two updates match the old owl-base implementation" (fun b ->
+      (* the numbers the owl-base version of Ppo.update gave on this run,
+         before issue #41 moved training to PyTorch *)
+      let ag = Ppo.init (Random.State.make [| 5 |]) in
+      let s = fixed_samples ag in
+      let rng = Random.State.make [| 3 |] in
+      let l = Ppo.update b rng (Ppo.learner ag) s in
+      let l = Ppo.update b rng l s in
+      let p, v = Ppo.losses l s and sp, sv = Ppo.symmetry_loss l s in
+      let close want got = Float.abs (want -. got) < 1e-9 in
+      List.iter
+        (fun (name, want, got) ->
+          assert_equal ~msg:name ~cmp:close ~printer:(Printf.sprintf "%.12g") want got)
+        [
+          ("policy", -0.00762864351856, p);
+          ("value", 0.0994547485546, v);
+          ("policy asym", 0.000195269993879, sp);
+          ("value asym", 0.00101067121775, sv);
+        ] );
     ( "write then read is exact" >:: fun _ ->
       let ag = Ppo.init (Random.State.make [| 6 |]) in
       let file = Filename.temp_file "ppo" ".txt" in
