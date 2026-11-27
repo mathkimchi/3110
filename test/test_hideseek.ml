@@ -578,8 +578,6 @@ let mlp_tests =
 
 (* ---------- Ppo ---------- *)
 
-let half_log_2pi = 0.5 *. log (2. *. Float.pi)
-
 let ppo_world =
   World.init ~walls:[]
     ~entities:
@@ -608,13 +606,33 @@ let rec train_on n l s =
 
 let ppo_tests =
   [
-    ( "log_prob at the mean, std 1" >:: fun _ ->
-      assert_equal ~cmp:feq ~printer:string_of_float (-2. *. half_log_2pi)
-        (Ppo.log_prob ~mean:[| 1.; 2. |] ~log_std:[| 0.; 0. |] [| 1.; 2. |]) );
-    ( "log_prob one std away, std e" >:: fun _ ->
-      assert_equal ~cmp:feq ~printer:string_of_float
-        (-0.5 -. 1. -. half_log_2pi)
-        (Ppo.log_prob ~mean:[| 0. |] ~log_std:[| 1. |] [| exp 1. |]) );
+    ( "move 4 stays, 0 is up-left, 5 is right" >:: fun _ ->
+      let v (m : Vec2d.t) = [| m.x; m.y |] in
+      assert_floats [| 0.; 0. |] (v (Ppo.move 4));
+      assert_floats [| -1.; -1. |] (v (Ppo.move 0));
+      assert_floats [| 1.; 0. |] (v (Ppo.move 5));
+      assert_floats [| 1.; 1. |] (v (Ppo.move 8)) );
+    ( "move out of range raises" >:: fun _ ->
+      assert_raises (Invalid_argument "Ppo.move: no such move") (fun () -> Ppo.move 9) );
+    ( "log_probs are a distribution over the 9 moves" >:: fun _ ->
+      let lp = Ppo.log_probs (Ppo.init (Random.State.make [| 4 |])) [| 0.1; -0.2; 0.3; 0.4 |] in
+      assert_equal ~printer:string_of_int Ppo.n_moves (Array.length lp);
+      assert_equal ~cmp:feq ~printer:string_of_float 1.
+        (Array.fold_left (fun acc l -> acc +. exp l) 0. lp) );
+    ( "act samples each move about as often as its probability" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 4 |]) and o = [| 0.1; -0.2; 0.3; 0.4 |] in
+      let rng = Random.State.make [| 1 |] and n = 20_000 in
+      let counts = Array.make Ppo.n_moves 0 in
+      for _ = 1 to n do
+        let i, _ = Ppo.act rng ag o in
+        counts.(i) <- counts.(i) + 1
+      done;
+      Array.iteri
+        (fun i l ->
+          let freq = float counts.(i) /. float n in
+          assert_bool (Printf.sprintf "move %d: %f vs %f" i freq (exp l))
+            (Float.abs (freq -. exp l) < 0.015))
+        (Ppo.log_probs ag o) );
     ( "gae with lambda 1 is the discounted return" >:: fun _ ->
       let adv, ret =
         Ppo.gae ~gamma:0.5 ~lambda:1. ~rewards:[| 1.; 2.; 4. |]
@@ -674,7 +692,7 @@ let ppo_tests =
       let o = [| 0.1; 0.2; 0.3; 0.4 |] in
       let a1, l1 = Ppo.act (Random.State.make [| 9 |]) ag o in
       let a2, l2 = Ppo.act (Random.State.make [| 9 |]) ag o in
-      assert_floats a1 a2;
+      assert_equal ~printer:string_of_int a1 a2;
       assert_equal ~cmp:feq l1 l2 );
     ( "update moves value toward the return" >:: fun _ ->
       let ag = Ppo.init (Random.State.make [| 5 |]) in
@@ -687,7 +705,7 @@ let ppo_tests =
       let ag = Ppo.init (Random.State.make [| 5 |]) in
       let s = one_sample ag ~adv:1. ~ret:0. in
       (* a lone sample normalizes to advantage 0, so mix in a bad action *)
-      let bad = { s with act = Array.map (fun x -> -.x) s.act; adv = -1. } in
+      let bad = { s with act = (s.act + 1) mod Ppo.n_moves; adv = -1. } in
       let bad = { bad with logp = Ppo.action_log_prob ag bad.obs bad.act } in
       let l =
         List.fold_left
@@ -715,7 +733,7 @@ let ppo_tests =
          advantage, which is 0 *)
       let ag = Ppo.init (Random.State.make [| 5 |]) in
       let s = one_sample ag ~adv:1. ~ret:0. in
-      let bad = { s with act = Array.map (fun x -> -.x) s.act; adv = -1. } in
+      let bad = { s with act = (s.act + 1) mod Ppo.n_moves; adv = -1. } in
       let bad = { bad with logp = Ppo.action_log_prob ag bad.obs bad.act } in
       let p, _ = Ppo.losses (Ppo.learner ag) [| s; bad |] in
       assert_equal ~cmp:feq ~printer:string_of_float 0. p );
@@ -723,7 +741,16 @@ let ppo_tests =
       assert_floats [| -0.1; 0.2; -0.3; 0.4 |] (Ppo.flip_obs (-1., 1.) [| 0.1; 0.2; 0.3; 0.4 |]);
       assert_floats [| 0.1; -0.2; 0.3; -0.4 |] (Ppo.flip_obs (1., -1.) [| 0.1; 0.2; 0.3; 0.4 |]) );
     ( "flip_act mirrors the move" >:: fun _ ->
-      assert_floats [| -1.; -2. |] (Ppo.flip_act (-1., -1.) [| 1.; 2. |]) );
+      assert_equal ~printer:string_of_int 2 (Ppo.flip_act (-1., 1.) 0);
+      assert_equal ~printer:string_of_int 6 (Ppo.flip_act (1., -1.) 0);
+      assert_equal ~printer:string_of_int 4 (Ppo.flip_act (-1., -1.) 4);
+      List.iter
+        (fun ((sx, sy) as g) ->
+          for i = 0 to Ppo.n_moves - 1 do
+            let m = Ppo.move i and f = Ppo.move (Ppo.flip_act g i) in
+            assert_floats [| sx *. m.x; sy *. m.y |] [| f.x; f.y |]
+          done)
+        Ppo.flips );
     ( "flips are the three mirrorings" >:: fun _ ->
       assert_equal [ (-1., 1.); (1., -1.); (-1., -1.) ] Ppo.flips );
     ( "observe of a mirrored world is the mirrored observation" >:: fun _ ->
@@ -746,9 +773,8 @@ let ppo_tests =
       in
       let policy =
         each (fun g (x : Ppo.sample) ->
-            let a = Ppo.mean ag (Ppo.flip_obs g x.obs)
-            and b = Ppo.flip_act g (Ppo.mean ag x.obs) in
-            [ (a.(0) -. b.(0)) ** 2.; (a.(1) -. b.(1)) ** 2. ])
+            let a = Ppo.log_probs ag (Ppo.flip_obs g x.obs) and b = Ppo.log_probs ag x.obs in
+            List.init Ppo.n_moves (fun i -> (a.(i) -. b.(Ppo.flip_act g i)) ** 2.))
       in
       let p, v = Ppo.symmetry_loss (Ppo.learner ag) [| s; s2 |] in
       assert_equal ~cmp:feq ~printer:string_of_float policy p;
@@ -764,6 +790,19 @@ let ppo_tests =
       let p1, v1 = Ppo.symmetry_loss (train_on 30 (Ppo.learner ag) s) batch in
       assert_bool (Printf.sprintf "policy %f -> %f" p0 p1) (p1 < p0);
       assert_bool (Printf.sprintf "value %f -> %f" v0 v1) (v1 < v0) );
+    ( "entropy is the mean entropy of the move probabilities" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 5 |]) in
+      let s = one_sample ag ~adv:1. ~ret:3. in
+      let s2 = { s with obs = [| 0.3; -0.1; -0.2; 0.4 |] } in
+      let h (x : Ppo.sample) =
+        Array.fold_left (fun acc l -> acc -. (exp l *. l)) 0. (Ppo.log_probs ag x.obs)
+      in
+      let e = Ppo.entropy (Ppo.learner ag) [| s; s2 |] in
+      assert_equal ~cmp:feq ~printer:string_of_float ((h s +. h s2) /. 2.) e;
+      assert_bool "at most log 9" (e <= log 9. +. 1e-9) );
+    ( "entropy of an empty batch is nan" >:: fun _ ->
+      assert_bool "nan"
+        (Float.is_nan (Ppo.entropy (Ppo.learner (Ppo.init (Random.State.make [| 5 |]))) [||])) );
     ( "losses of an empty batch are nan" >:: fun _ ->
       let p, v = Ppo.losses (Ppo.learner (Ppo.init (Random.State.make [| 5 |]))) [||] in
       assert_bool "nan" (Float.is_nan p && Float.is_nan v) );
@@ -786,7 +825,7 @@ let ppo_tests =
       assert_equal ~cmp:feq (Ppo.value ag o) (Ppo.value ag' o);
       let a, l = Ppo.act (Random.State.make [| 2 |]) ag o in
       let a', l' = Ppo.act (Random.State.make [| 2 |]) ag' o in
-      assert_floats a a';
+      assert_equal ~printer:string_of_int a a';
       assert_equal ~cmp:feq l l' );
   ]
 
@@ -897,7 +936,7 @@ let with_temp f =
 let same_agent a b =
   let o = [| 0.2; 0.7; 0.5; 0.1 |] in
   feq (Ppo.value a o) (Ppo.value b o)
-  && feq (Ppo.action_log_prob a o [| 0.3; -0.4 |]) (Ppo.action_log_prob b o [| 0.3; -0.4 |])
+  && feq (Ppo.action_log_prob a o 3) (Ppo.action_log_prob b o 3)
 
 let weights_tests =
   [

@@ -46,7 +46,7 @@ type experience = { hider : Ppo.sample array; hunter : Ppo.sample array }
 (* one decision a PPO side made; [reward] is filled in after the step *)
 type step = {
   obs : float array;
-  act : float array;
+  act : int;
   logp : float;
   value : float;
   mutable reward : float;
@@ -62,7 +62,7 @@ let recorder rng ag log : (module Strategy.S) =
       let act, logp = Ppo.act rng ag obs in
       log.steps <- { obs; act; logp; value = Ppo.value ag obs; reward = 0. } :: log.steps;
       log.count <- log.count + 1;
-      Vec2d.{ x = act.(0); y = act.(1) }
+      Ppo.move act
   end)
 
 let samples ~bootstrap log =
