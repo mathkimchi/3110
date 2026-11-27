@@ -3,8 +3,10 @@ module AD = Mlp.AD
 
 (* ---------- hyperparameters ---------- *)
 
-(* Width of [World.default] in pixels. Positions are divided by this so the
-   networks get inputs around 0..1. *)
+(* Width of [World.default] in pixels. Positions are measured from the
+   middle of the arena and divided by this, so the networks get inputs in
+   -0.5..0.5 and mirroring the map in x or y is just negating that
+   coordinate (see [flips]). *)
 let arena = 400.
 
 (* Discount halflife in game seconds: a reward this far ahead counts half
@@ -56,6 +58,14 @@ let epochs = 4
    more, noisier steps. *)
 let minibatch = 256
 
+(* Weight of the symmetry penalty (issue #36) against the PPO losses. The
+   map looks the same mirrored left-right or top-bottom, so the best move in
+   a mirrored position is the mirrored move and the value is the same;
+   [update] adds this times the mean squared difference from that to both
+   losses, so what is learned on one side of the map carries over to the
+   other three. 0 turns it off. *)
+let symmetry_coef = 1.
+
 let log_2pi = log (2. *. Float.pi)
 
 type agent = { policy : Mlp.t; value : Mlp.t; log_std : float array }
@@ -71,6 +81,15 @@ let init rng =
     value = Mlp.init rng [ 4; 16; 16; 16; 1 ];
     log_std = [| 0.; 0. |];
   }
+
+(* ---------- symmetry ---------- *)
+
+(* The three mirrorings of the map other than doing nothing, as the sign
+   they multiply x and y by: left-right, top-bottom, and both. Observations
+   are measured from the middle of the arena, so that is all they do. *)
+let flips = [ (-1., 1.); (1., -1.); (-1., -1.) ]
+let flip_obs (sx, sy) o = [| sx *. o.(0); sy *. o.(1); sx *. o.(2); sy *. o.(3) |]
+let flip_act (sx, sy) a = [| sx *. a.(0); sy *. a.(1) |]
 
 (* ---------- acting ---------- *)
 
@@ -94,7 +113,8 @@ let observe w (e : Entity.t) =
       None opponents
     |> Option.value ~default:me
   in
-  Array.map (fun v -> v /. arena) [| me.x; me.y; other.x; other.y |]
+  let mid = arena /. 2. in
+  Array.map (fun v -> (v -. mid) /. arena) [| me.x; me.y; other.x; other.y |]
 
 let log_prob ~mean ~log_std a =
   let total = ref 0. in
@@ -110,8 +130,8 @@ let normal rng =
   let u = 1. -. Random.State.float rng 1. and v = Random.State.float rng 1. in
   sqrt (-2. *. log u) *. cos (2. *. Float.pi *. v)
 
-let action_log_prob ag o a =
-  log_prob ~mean:(Mlp.forward ag.policy o) ~log_std:ag.log_std a
+let mean ag o = Mlp.forward ag.policy o
+let action_log_prob ag o a = log_prob ~mean:(mean ag o) ~log_std:ag.log_std a
 
 let act rng ag o =
   let mean = Mlp.forward ag.policy o in
@@ -212,10 +232,32 @@ let matrix f cols xs =
   let rows = Array.length xs in
   AD.pack_arr (N.of_array (Array.concat (Array.to_list (Array.map f xs))) [| rows; cols |])
 
+(* [policy_params] without its last entry, log_std *)
+let mlp_part ps = List.filteri (fun i _ -> i < List.length ps - 1) ps
+
+(* the mean, over [flips] and every output of every sample, of the squared
+   difference between the network [ps] at the mirrored observation and the
+   mirrored output at the original one; [sign g] is how [g] mirrors the
+   output: the move for the policy, nothing for the value *)
+let asymmetry ~outputs sign batch ps =
+  let x = matrix (fun s -> s.obs) 4 batch in
+  let y = Mlp.forward_ad ps x in
+  let term g =
+    let gx = matrix (fun s -> flip_obs g s.obs) 4 batch in
+    let gy = AD.pack_arr (N.of_array (sign g) [| 1; outputs |]) in
+    AD.Maths.(mean (sqr (Mlp.forward_ad ps gx - (y * gy))))
+  in
+  let open AD.Maths in
+  List.fold_left (fun acc g -> acc + term g) (AD._f 0.) flips
+  / AD._f (float (List.length flips))
+
+let policy_asymmetry = asymmetry ~outputs:2 (fun g -> flip_act g [| 1.; 1. |])
+let value_asymmetry = asymmetry ~outputs:1 (fun _ -> [| 1. |])
+
 (* the negated clipped surrogate objective; the last param is log_std *)
 let policy_loss batch ps =
   let n = Array.length batch in
-  let mlp_ps = List.filteri (fun i _ -> i < List.length ps - 1) ps in
+  let mlp_ps = mlp_part ps in
   let log_std = List.nth ps (List.length ps - 1) in
   let x = matrix (fun s -> s.obs) 4 batch in
   let a = matrix (fun s -> s.act) 2 batch in
@@ -238,11 +280,19 @@ let value_loss batch ps =
   let ret = matrix (fun s -> [| s.ret |]) 1 batch in
   AD.Maths.(mean (sqr (Mlp.forward_ad ps x - ret)))
 
+(* what [update] minimizes: the PPO loss plus the symmetry penalty *)
+let policy_objective batch ps =
+  AD.Maths.(
+    policy_loss batch ps + (AD._f symmetry_coef * policy_asymmetry batch (mlp_part ps)))
+
+let value_objective batch ps =
+  AD.Maths.(value_loss batch ps + (AD._f symmetry_coef * value_asymmetry batch ps))
+
 let minibatch_step l batch =
   let pp = policy_params l.ag in
-  let pp, policy_opt = adam_step l.policy_opt pp (grads (policy_loss batch) pp) in
+  let pp, policy_opt = adam_step l.policy_opt pp (grads (policy_objective batch) pp) in
   let vp = Mlp.params l.ag.value in
-  let vp, value_opt = adam_step l.value_opt vp (grads (value_loss batch) vp) in
+  let vp, value_opt = adam_step l.value_opt vp (grads (value_objective batch) vp) in
   let k = List.length pp - 1 in
   let ag =
     {
@@ -297,6 +347,13 @@ let losses l samples =
     let s = normalize_adv samples in
     let eval loss ps = AD.unpack_flt (loss s (List.map AD.pack_arr ps)) in
     (eval policy_loss (policy_params l.ag), eval value_loss (Mlp.params l.ag.value))
+
+let symmetry_loss l samples =
+  if Array.length samples = 0 then (nan, nan)
+  else
+    let eval loss ps = AD.unpack_flt (loss samples (List.map AD.pack_arr ps)) in
+    ( eval policy_asymmetry (Mlp.params l.ag.policy),
+      eval value_asymmetry (Mlp.params l.ag.value) )
 
 (* ---------- saving ---------- *)
 

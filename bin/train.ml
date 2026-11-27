@@ -220,18 +220,21 @@ let () =
             (fun l ->
               let samples = Array.concat (List.rev xp) in
               let l = Ppo.update rng l samples in
-              (l, Ppo.losses l samples))
+              (l, Ppo.losses l samples, Ppo.symmetry_loss l samples))
             l
         in
         let t0 = Unix.gettimeofday () in
         let hider_u = update hider hider_xp and hunter_u = update hunter hunter_xp in
-        let hider = Option.map fst hider_u and hunter = Option.map fst hunter_u in
+        let learner = Option.map (fun (l, _, _) -> l) in
+        let hider = learner hider_u and hunter = learner hunter_u in
         if hider <> None || hunter <> None then begin
           Printf.printf "  updated after round %d in %.2f s\n%!" i
             (Unix.gettimeofday () -. t0);
           let report name =
-            Option.iter (fun (_, (p, v)) ->
-                Printf.printf "    %-6s policy loss %9.4f | value loss %12.4f\n%!" name p v)
+            Option.iter (fun (_, (p, v), (sp, sv)) ->
+                Printf.printf
+                  "    %-6s policy loss %9.4f | value loss %12.4f | asymmetry policy %8.4f value %8.4f\n%!"
+                  name p v sp sv)
           in
           report "hider" hider_u;
           report "hunter" hunter_u

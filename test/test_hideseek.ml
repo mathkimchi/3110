@@ -655,9 +655,9 @@ let ppo_tests =
     ( "gae length mismatch" >:: fun _ ->
       assert_raises (Invalid_argument "Ppo.gae: length mismatch") (fun () ->
           Ppo.gae ~gamma:0.9 ~lambda:0.9 ~rewards:[| 1. |] ~values:[||] ()) );
-    ( "observe: own center then opponent center, scaled" >:: fun _ ->
+    ( "observe: own center then opponent center, from the middle, scaled" >:: fun _ ->
       let hider = List.hd (World.entities ppo_world) in
-      assert_floats [| 35. /. 400.; 75. /. 400.; 195. /. 400.; 395. /. 400. |]
+      assert_floats [| -165. /. 400.; -125. /. 400.; -5. /. 400.; 195. /. 400. |]
         (Ppo.observe ppo_world hider) );
     ( "observe: no living opponent uses own center" >:: fun _ ->
       let hider = List.hd (World.entities ppo_world) in
@@ -667,7 +667,7 @@ let ppo_tests =
              (fun (e : Entity.t) -> if e.role = Hunter then { e with alive = false } else e)
              (World.entities ppo_world))
       in
-      assert_floats [| 35. /. 400.; 75. /. 400.; 35. /. 400.; 75. /. 400. |]
+      assert_floats [| -165. /. 400.; -125. /. 400.; -165. /. 400.; -125. /. 400. |]
         (Ppo.observe w hider) );
     ( "act is reproducible from the seed" >:: fun _ ->
       let ag = Ppo.init (Random.State.make [| 4 |]) in
@@ -719,6 +719,51 @@ let ppo_tests =
       let bad = { bad with logp = Ppo.action_log_prob ag bad.obs bad.act } in
       let p, _ = Ppo.losses (Ppo.learner ag) [| s; bad |] in
       assert_equal ~cmp:feq ~printer:string_of_float 0. p );
+    ( "flip_obs mirrors both positions" >:: fun _ ->
+      assert_floats [| -0.1; 0.2; -0.3; 0.4 |] (Ppo.flip_obs (-1., 1.) [| 0.1; 0.2; 0.3; 0.4 |]);
+      assert_floats [| 0.1; -0.2; 0.3; -0.4 |] (Ppo.flip_obs (1., -1.) [| 0.1; 0.2; 0.3; 0.4 |]) );
+    ( "flip_act mirrors the move" >:: fun _ ->
+      assert_floats [| -1.; -2. |] (Ppo.flip_act (-1., -1.) [| 1.; 2. |]) );
+    ( "flips are the three mirrorings" >:: fun _ ->
+      assert_equal [ (-1., 1.); (1., -1.); (-1., -1.) ] Ppo.flips );
+    ( "observe of a mirrored world is the mirrored observation" >:: fun _ ->
+      (* mirror ppo_world left-right: x -> 400 - x - size *)
+      let mirror (e : Entity.t) = { e with pos = { e.pos with x = 400. -. e.pos.x -. e.size } } in
+      let w = World.with_entities ppo_world (List.map mirror (World.entities ppo_world)) in
+      let hider w = List.hd (World.entities w) in
+      assert_floats
+        (Ppo.flip_obs (-1., 1.) (Ppo.observe ppo_world (hider ppo_world)))
+        (Ppo.observe w (hider w)) );
+    ( "symmetry_loss is the mean squared asymmetry" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 5 |]) in
+      let s = one_sample ag ~adv:1. ~ret:3. in
+      let s2 = { s with obs = [| 0.3; -0.1; -0.2; 0.4 |] } in
+      let mean_of xs = List.fold_left ( +. ) 0. xs /. float (List.length xs) in
+      let each f = mean_of (List.concat_map (fun g -> List.concat_map (f g) [ s; s2 ]) Ppo.flips) in
+      let value =
+        each (fun g (x : Ppo.sample) ->
+            [ (Ppo.value ag (Ppo.flip_obs g x.obs) -. Ppo.value ag x.obs) ** 2. ])
+      in
+      let policy =
+        each (fun g (x : Ppo.sample) ->
+            let a = Ppo.mean ag (Ppo.flip_obs g x.obs)
+            and b = Ppo.flip_act g (Ppo.mean ag x.obs) in
+            [ (a.(0) -. b.(0)) ** 2.; (a.(1) -. b.(1)) ** 2. ])
+      in
+      let p, v = Ppo.symmetry_loss (Ppo.learner ag) [| s; s2 |] in
+      assert_equal ~cmp:feq ~printer:string_of_float policy p;
+      assert_equal ~cmp:feq ~printer:string_of_float value v );
+    ( "symmetry_loss of an empty batch is nan" >:: fun _ ->
+      let p, v = Ppo.symmetry_loss (Ppo.learner (Ppo.init (Random.State.make [| 5 |]))) [||] in
+      assert_bool "nan" (Float.is_nan p && Float.is_nan v) );
+    ( "update makes the networks more symmetric" >:: fun _ ->
+      let ag = Ppo.init (Random.State.make [| 5 |]) in
+      let s = one_sample ag ~adv:1. ~ret:3. in
+      let batch = [| s |] in
+      let p0, v0 = Ppo.symmetry_loss (Ppo.learner ag) batch in
+      let p1, v1 = Ppo.symmetry_loss (train_on 30 (Ppo.learner ag) s) batch in
+      assert_bool (Printf.sprintf "policy %f -> %f" p0 p1) (p1 < p0);
+      assert_bool (Printf.sprintf "value %f -> %f" v0 v1) (v1 < v0) );
     ( "losses of an empty batch are nan" >:: fun _ ->
       let p, v = Ppo.losses (Ppo.learner (Ppo.init (Random.State.make [| 5 |]))) [||] in
       assert_bool "nan" (Float.is_nan p && Float.is_nan v) );

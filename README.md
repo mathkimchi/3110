@@ -30,6 +30,11 @@ The hider is rewarded for every step it stays alive, so its return is
 `1 - 0.5^(seconds survived / 20)`. After each update the trainer prints the
 average survival time of the batch and each network's losses.
 
+The map looks the same mirrored left-right or top-bottom, so each update also
+penalizes the networks for treating a position differently from its mirror
+images (`Ppo.symmetry_coef`, 0 turns it off). The printed asymmetry is how
+far they still are from symmetric; it should fall toward 0 as training goes.
+
 By default both sides are trained with PPO (needs `opam install owl-base`).
 Pick who plays each side, how often the networks update, and where to save
 or load them:
