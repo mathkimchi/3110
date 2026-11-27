@@ -35,6 +35,12 @@ penalizes the networks for treating a position differently from its mirror
 images (`Ppo.symmetry_coef`, 0 turns it off). The printed asymmetry is how
 far they still are from symmetric; it should fall toward 0 as training goes.
 
+Each step a PPO side picks one of 9 moves (stay or one of 8 directions), like
+the keyboard player. The printed entropy is how unsure it is: about 2.2 when
+every move is equally likely, 0 when it always picks one. A small bonus
+(`Ppo.entropy_coef`) keeps it from settling on one move too early. Weights
+files saved before this change cannot be loaded; retrain them.
+
 By default both sides are trained with PPO (needs `opam install owl-base`).
 Pick who plays each side, how often the networks update, and where to save
 or load them:
