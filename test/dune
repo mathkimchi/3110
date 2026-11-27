@@ -1,3 +1,7 @@
 (test
  (name test_hideseek)
+ (deps ../python/ppo_torch.py)
+ ; sequential: each parallel worker would start its own PyTorch process
+ (action
+  (run %{test} -runner sequential))
  (libraries ounit2 hideseek raylib))

@@ -1,5 +1,3 @@
-module N = Mlp.N
-module AD = Mlp.AD
 
 (* ---------- hyperparameters ---------- *)
 
@@ -165,143 +163,35 @@ type sample = {
   ret : float;
 }
 
-(* Adam state for a list of parameter arrays *)
-type adam = { m : Mlp.arr list; v : Mlp.arr list; steps : int }
-
-let adam_init params =
-  let z = List.map (fun p -> N.zeros (N.shape p)) params in
-  { m = z; v = z; steps = 0 }
-
 (* Adam's standard settings. beta1: decay of the running mean of gradients
    (momentum). beta2: decay of the running mean of squared gradients (the
    per-parameter step scale). eps: keeps the division away from 0. Rarely
-   worth changing. *)
+   worth changing. The Adam step itself runs in python/ppo_torch.py. *)
 let beta1 = 0.9
 let beta2 = 0.999
 let eps = 1e-8
 
-(* one Adam step: the new parameters and the new state *)
-let adam_step st params grads =
-  let steps = st.steps + 1 in
-  let m =
-    List.map2
-      (fun m g -> N.add (N.mul_scalar m beta1) (N.mul_scalar g (1. -. beta1)))
-      st.m grads
-  in
-  let v =
-    List.map2
-      (fun v g ->
-        N.add (N.mul_scalar v beta2) (N.mul_scalar (N.sqr g) (1. -. beta2)))
-      st.v grads
-  in
-  let c1 = 1. -. (beta1 ** float steps) and c2 = 1. -. (beta2 ** float steps) in
-  let params =
-    List.map2
-      (fun p (m, v) ->
-        let m_hat = N.mul_scalar m (1. /. c1) in
-        let v_hat = N.mul_scalar v (1. /. c2) in
-        N.sub p
-          (N.mul_scalar (N.div m_hat (N.add_scalar (N.sqrt v_hat) eps)) lr))
-      params (List.combine m v)
-  in
-  (params, { m; v; steps })
+(* The learner's Adam state: running means [m] and [v] of each parameter
+   array's gradient (same shapes as the parameters) for the policy (whose
+   last array is log_std) and the value network, and how many steps both
+   have taken. *)
+type learner = {
+  ag : agent;
+  policy_m : float array list;
+  policy_v : float array list;
+  value_m : float array list;
+  value_v : float array list;
+  steps : int;
+}
 
-(* the gradient of [loss] with respect to each array in [params] *)
-let grads loss params =
-  let tag = AD.tag () in
-  let ps = List.map (fun p -> AD.make_reverse (AD.pack_arr p) tag) params in
-  AD.reverse_prop (AD._f 1.) (loss ps);
-  List.map (fun p -> AD.unpack_arr (AD.adjval p)) ps
-
-type learner = { ag : agent; policy_opt : adam; value_opt : adam }
-
-let row v = N.of_array v [| 1; Array.length v |]
-let policy_params ag = Mlp.params ag.policy @ [ row ag.log_std ]
+let policy_params ag = Mlp.params ag.policy @ [ Array.copy ag.log_std ]
+let zeros = List.map (fun p -> Array.make (Array.length p) 0.)
 
 let learner ag =
-  {
-    ag;
-    policy_opt = adam_init (policy_params ag);
-    value_opt = adam_init (Mlp.params ag.value);
-  }
+  let pz = zeros (policy_params ag) and vz = zeros (Mlp.params ag.value) in
+  { ag; policy_m = pz; policy_v = pz; value_m = vz; value_v = vz; steps = 0 }
 
 let agent l = l.ag
-
-(* a [rows x cols] constant from one row per element of [xs] *)
-let matrix f cols xs =
-  let rows = Array.length xs in
-  AD.pack_arr (N.of_array (Array.concat (Array.to_list (Array.map f xs))) [| rows; cols |])
-
-(* [policy_params] without its last entry, log_std *)
-let mlp_part ps = List.filteri (fun i _ -> i < List.length ps - 1) ps
-
-(* the mean, over [flips] and every output of every sample, of the squared
-   difference between the network [ps] at the mirrored observation and the
-   mirrored output at the original one; [sign g] is how [g] mirrors the
-   output: the move for the policy, nothing for the value *)
-let asymmetry ~outputs sign batch ps =
-  let x = matrix (fun s -> s.obs) 4 batch in
-  let y = Mlp.forward_ad ps x in
-  let term g =
-    let gx = matrix (fun s -> flip_obs g s.obs) 4 batch in
-    let gy = AD.pack_arr (N.of_array (sign g) [| 1; outputs |]) in
-    AD.Maths.(mean (sqr (Mlp.forward_ad ps gx - (y * gy))))
-  in
-  let open AD.Maths in
-  List.fold_left (fun acc g -> acc + term g) (AD._f 0.) flips
-  / AD._f (float (List.length flips))
-
-let policy_asymmetry = asymmetry ~outputs:2 (fun g -> flip_act g [| 1.; 1. |])
-let value_asymmetry = asymmetry ~outputs:1 (fun _ -> [| 1. |])
-
-(* the negated clipped surrogate objective; the last param is log_std *)
-let policy_loss batch ps =
-  let n = Array.length batch in
-  let mlp_ps = mlp_part ps in
-  let log_std = List.nth ps (List.length ps - 1) in
-  let x = matrix (fun s -> s.obs) 4 batch in
-  let a = matrix (fun s -> s.act) 2 batch in
-  let old_logp = matrix (fun s -> [| s.logp |]) 1 batch in
-  let adv = matrix (fun s -> [| s.adv |]) 1 batch in
-  let const c = AD.pack_arr (N.create [| n; 1 |] c) in
-  let open AD.Maths in
-  let mu = Mlp.forward_ad mlp_ps x in
-  let z = (a - mu) / exp log_std in
-  let logp =
-    sum_reduce ~axis:[| 1 |] ((AD._f (-0.5) * sqr z) - log_std)
-    - AD._f log_2pi
-  in
-  let ratio = exp (logp - old_logp) in
-  let clipped = max2 (min2 ratio (const (1. +. clip))) (const (1. -. clip)) in
-  neg (mean (min2 (ratio * adv) (clipped * adv)))
-
-let value_loss batch ps =
-  let x = matrix (fun s -> s.obs) 4 batch in
-  let ret = matrix (fun s -> [| s.ret |]) 1 batch in
-  AD.Maths.(mean (sqr (Mlp.forward_ad ps x - ret)))
-
-(* what [update] minimizes: the PPO loss plus the symmetry penalty *)
-let policy_objective batch ps =
-  AD.Maths.(
-    policy_loss batch ps + (AD._f symmetry_coef * policy_asymmetry batch (mlp_part ps)))
-
-let value_objective batch ps =
-  AD.Maths.(value_loss batch ps + (AD._f symmetry_coef * value_asymmetry batch ps))
-
-let minibatch_step l batch =
-  let pp = policy_params l.ag in
-  let pp, policy_opt = adam_step l.policy_opt pp (grads (policy_objective batch) pp) in
-  let vp = Mlp.params l.ag.value in
-  let vp, value_opt = adam_step l.value_opt vp (grads (value_objective batch) vp) in
-  let k = List.length pp - 1 in
-  let ag =
-    {
-      policy = Mlp.with_params l.ag.policy (List.filteri (fun i _ -> i < k) pp);
-      value = Mlp.with_params l.ag.value vp;
-      log_std = Mlp.to_array (List.nth pp k);
-    }
-  in
-  { ag; policy_opt; value_opt }
 
 let normalize_adv samples =
   let n = float (Array.length samples) in
@@ -312,9 +202,10 @@ let normalize_adv samples =
   let sd = sqrt var +. 1e-8 in
   Array.map (fun s -> { s with adv = (s.adv -. mu) /. sd }) samples
 
-let shuffle rng a =
-  let a = Array.copy a in
-  for i = Array.length a - 1 downto 1 do
+(* a random order of 0 .. n - 1 (Fisher-Yates) *)
+let permutation rng n =
+  let a = Array.init n Fun.id in
+  for i = n - 1 downto 1 do
     let j = Random.State.int rng (i + 1) in
     let t = a.(i) in
     a.(i) <- a.(j);
@@ -322,38 +213,118 @@ let shuffle rng a =
   done;
   a
 
-let update rng l samples =
+let widths n = String.concat "," (List.map string_of_int (Mlp.sizes n))
+
+(* the [count] arrays at the front of [floats], with [like]'s lengths, and
+   the rest *)
+let split like floats =
+  let pos = ref 0 in
+  let arrs =
+    List.map
+      (fun p ->
+        let a = Array.sub floats !pos (Array.length p) in
+        pos := !pos + Array.length p;
+        a)
+      like
+  in
+  (arrs, Array.sub floats !pos (Array.length floats - !pos))
+
+(* Sends [l] and the normalized [samples] to the backend for [epochs]
+   passes in the orders [orders]; is the updated learner and the losses the
+   backend computed before updating: (policy, value, policy asymmetry,
+   value asymmetry). *)
+let torch_update backend l samples orders =
+  let pp = policy_params l.ag and vp = Mlp.params l.ag.value in
+  let flips =
+    String.concat ";"
+      (List.map (fun (sx, sy) -> Printf.sprintf "%d,%d" (truncate sx) (truncate sy)) flips)
+  in
+  let line =
+    Printf.sprintf
+      "update policy=%s value=%s n=%d epochs=%d minibatch=%d steps=%d clip=%s \
+       lr=%s beta1=%s beta2=%s eps=%s symmetry=%s flips=%s"
+      (widths l.ag.policy) (widths l.ag.value) (Array.length samples)
+      (List.length orders) minibatch l.steps (Torch_backend.hex clip)
+      (Torch_backend.hex lr) (Torch_backend.hex beta1) (Torch_backend.hex beta2)
+      (Torch_backend.hex eps) (Torch_backend.hex symmetry_coef) flips
+  in
+  let sample s = Array.concat [ s.obs; s.act; [| s.logp; s.adv; s.ret |] ] in
+  let floats =
+    Array.concat
+      (List.concat
+         [
+           pp; l.policy_m; l.policy_v; vp; l.value_m; l.value_v;
+           Array.to_list (Array.map sample samples);
+           List.map (Array.map float) orders;
+         ])
+  in
+  let words, reply = Torch_backend.request backend line floats in
+  let pp', rest = split pp reply in
+  let pm, rest = split pp rest in
+  let pv, rest = split pp rest in
+  let vp', rest = split vp rest in
+  let vm, rest = split vp rest in
+  let vv, _ = split vp rest in
+  let steps, before =
+    match words with
+    | steps :: losses when List.length losses = 4 ->
+        (int_of_string steps, Array.of_list (List.map float_of_string losses))
+    | _ -> failwith "Ppo.update: bad reply from the backend"
+  in
+  let k = List.length pp' - 1 in
+  let ag =
+    {
+      policy = Mlp.with_params l.ag.policy (List.filteri (fun i _ -> i < k) pp');
+      value = Mlp.with_params l.ag.value vp';
+      log_std = List.nth pp' k;
+    }
+  in
+  ( { ag; policy_m = pm; policy_v = pv; value_m = vm; value_v = vv; steps },
+    before )
+
+let update backend rng l samples =
   if Array.length samples = 0 then l
   else
     let samples = normalize_adv samples in
     let n = Array.length samples in
-    let rec epoch e l =
-      if e = 0 then l
-      else
-        let s = shuffle rng samples in
-        let rec go start l =
-          if start >= n then l
-          else
-            let len = min minibatch (n - start) in
-            go (start + len) (minibatch_step l (Array.sub s start len))
-        in
-        epoch (e - 1) (go 0 l)
-    in
-    epoch epochs l
+    let orders = List.init epochs (fun _ -> permutation rng n) in
+    fst (torch_update backend l samples orders)
+
+let torch_losses backend l samples =
+  if Array.length samples = 0 then ((nan, nan), (nan, nan))
+  else
+    let _, b = torch_update backend l (normalize_adv samples) [] in
+    ((b.(0), b.(1)), (b.(2), b.(3)))
+
+let mean_of f xs = Array.fold_left (fun acc x -> acc +. f x) 0. xs /. float (Array.length xs)
 
 let losses l samples =
   if Array.length samples = 0 then (nan, nan)
   else
-    let s = normalize_adv samples in
-    let eval loss ps = AD.unpack_flt (loss s (List.map AD.pack_arr ps)) in
-    (eval policy_loss (policy_params l.ag), eval value_loss (Mlp.params l.ag.value))
+    let s = normalize_adv samples and ag = l.ag in
+    let surrogate s =
+      let ratio = exp (action_log_prob ag s.obs s.act -. s.logp) in
+      let clipped = Float.max (Float.min ratio (1. +. clip)) (1. -. clip) in
+      Float.min (ratio *. s.adv) (clipped *. s.adv)
+    in
+    ( -.mean_of surrogate s,
+      mean_of (fun s -> (value ag s.obs -. s.ret) ** 2.) s )
+
+(* the mean over [flips] of [f g s] for every sample [s] *)
+let over_flips f samples =
+  List.fold_left (fun acc g -> acc +. mean_of (f g) samples) 0. flips
+  /. float (List.length flips)
 
 let symmetry_loss l samples =
   if Array.length samples = 0 then (nan, nan)
   else
-    let eval loss ps = AD.unpack_flt (loss samples (List.map AD.pack_arr ps)) in
-    ( eval policy_asymmetry (Mlp.params l.ag.policy),
-      eval value_asymmetry (Mlp.params l.ag.value) )
+    let ag = l.ag in
+    let policy g s =
+      let a = mean ag (flip_obs g s.obs) and b = flip_act g (mean ag s.obs) in
+      (((a.(0) -. b.(0)) ** 2.) +. ((a.(1) -. b.(1)) ** 2.)) /. 2.
+    in
+    let value g s = (value ag (flip_obs g s.obs) -. value ag s.obs) ** 2. in
+    (over_flips policy samples, over_flips value samples)
 
 (* ---------- saving ---------- *)
 

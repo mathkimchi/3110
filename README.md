@@ -35,7 +35,16 @@ penalizes the networks for treating a position differently from its mirror
 images (`Ppo.symmetry_coef`, 0 turns it off). The printed asymmetry is how
 far they still are from symmetric; it should fall toward 0 as training goes.
 
-By default both sides are trained with PPO (needs `opam install owl-base`).
+By default both sides are trained with PPO. The games and the networks'
+forward pass run in OCaml, but each update (backprop and Adam) runs in
+PyTorch: `train.exe` starts `python/ppo_torch.py` once and sends it the
+samples. Run it from the repo root. With [uv](https://docs.astral.sh/uv/)
+installed nothing else is needed; the first run downloads CPU torch into
+uv's cache. Without uv it runs `python3`, which then needs torch
+(`pip install torch numpy`); `--python=CMD` picks another command, e.g.
+`--python=.venv/bin/python`. Tests that need torch are skipped when it is
+missing.
+
 Pick who plays each side, how often the networks update, and where to save
 or load them:
 

@@ -14,6 +14,7 @@ let hunter_ppo = ref true
 let speed = ref 1.
 let out = ref None
 let input = ref None
+let python = ref None
 
 let positive name set x =
   if x <= 0 then raise (Arg.Bad (name ^ " must be greater than 0"));
@@ -64,11 +65,17 @@ let speclist =
       Arg.String (fun f -> input := Some f),
       " file saved by --out to start the PPO sides from, e.g. --in=nn.txt \
        (default: fresh networks)" );
+    ( "--python",
+      Arg.String (fun c -> python := Some c),
+      " command that runs python/ppo_torch.py, the PyTorch trainer, e.g. \
+       --python=python3 for a python that has torch (default: uv run \
+       --quiet if uv is installed, else python3)" );
   ]
 
 let usage =
   "train [--rounds=N] [--time=SECONDS] [--seed=N] [--hider=ppo|greedy] \
-   [--hunter=ppo|greedy] [--speed=X] [--batch=N] [--out=FILE] [--in=FILE]"
+   [--hunter=ppo|greedy] [--speed=X] [--batch=N] [--out=FILE] [--in=FILE] \
+   [--python=CMD]"
 
 let outcome_name = function
   | Game.Hiders_win -> "hiders win "
@@ -172,6 +179,14 @@ let () =
   Option.iter
     (fun (w : Weights.t) -> Printf.printf "loaded %s (saved by a run with --seed=%d)\n" (Option.get !input) w.seed)
     loaded;
+  (* the PyTorch process that does the updates; started before the window
+     so a missing torch fails fast *)
+  let backend =
+    if !hider_ppo || !hunter_ppo then (
+      try Some (Torch_backend.start ?python:!python ~script:"python/ppo_torch.py" ())
+      with Failure m -> fail m)
+    else None
+  in
   (* same window setup as bin/main.ml, without a target FPS so drawing never
      waits; [show] does the pacing *)
   Raylib.set_config_flags Raylib.ConfigFlags.window_resizable;
@@ -219,7 +234,7 @@ let () =
           Option.map
             (fun l ->
               let samples = Array.concat (List.rev xp) in
-              let l = Ppo.update rng l samples in
+              let l = Ppo.update (Option.get backend) rng l samples in
               (l, Ppo.losses l samples, Ppo.symmetry_loss l samples))
             l
         in
@@ -259,6 +274,7 @@ let () =
     (speedup ~game:game_total ~wall:wall_total);
   Display.unload_sprites sprites;
   Raylib.close_window ();
+  Option.iter Torch_backend.stop backend;
   match !out with
   | Some f ->
       Weights.save f

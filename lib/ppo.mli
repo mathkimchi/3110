@@ -3,6 +3,10 @@
     position is. Both are [Mlp]s of widths 4-5-5-2 (policy) and 4-5-5-1
     (value), as in issue #29.
 
+    Rollouts run the networks forward in OCaml ([Mlp.forward]); the
+    training step (backprop and Adam) runs in PyTorch through
+    [Torch_backend].
+
     Hyperparameters: discount halflife 20 s, GAE lambda halflife 5 s,
     clip 0.2, Adam with learning rate 3e-3, 4 epochs of minibatches of 256
     per update, symmetry penalty weight 1. *)
@@ -127,13 +131,22 @@ val learner : agent -> learner
 val agent : learner -> agent
 (** [agent l] is the agent [l] is training. *)
 
-val update : Random.State.t -> learner -> sample array -> learner
-(** [update rng l samples] runs the PPO update on [samples]: advantages are
-    normalized, then for each epoch the samples are shuffled with [rng] and
-    split into minibatches, and each minibatch takes one Adam step on the
-    clipped policy loss (policy and [log_std]) and one on the squared error
-    of the value network, each plus [symmetry_coef] times its part of
-    [symmetry_loss]. [l] unchanged if [samples] is empty. *)
+val update : Torch_backend.t -> Random.State.t -> learner -> sample array -> learner
+(** [update backend rng l samples] runs the PPO update on [samples] in
+    [backend] (PyTorch): advantages are normalized, then for each epoch the
+    samples are shuffled with [rng] and split into minibatches, and each
+    minibatch takes one Adam step on the clipped policy loss (policy and
+    [log_std]) and one on the squared error of the value network, each plus
+    [symmetry_coef] times its part of [symmetry_loss]. [l] unchanged if
+    [samples] is empty (then [backend] is not used).
+    Raises [Failure] if [backend] fails. *)
+
+val torch_losses :
+  Torch_backend.t -> learner -> sample array -> (float * float) * (float * float)
+(** [torch_losses backend l samples] is [(losses l samples, symmetry_loss l
+    samples)] as computed by [backend] instead of in OCaml, without
+    changing [l]. They agree up to rounding; a test checks that the PyTorch
+    losses match the ones here. *)
 
 val losses : learner -> sample array -> float * float
 (** [losses l samples] is [(policy, value)]: the clipped policy loss and the
